@@ -12,7 +12,7 @@ This plan outlines the phases and tasks required to implement the core multi-age
     - [x] Create `ai_jobs` table for tracking agent tasks.
 - [~] **Task: Implement Global Tools**
     - [x] Implement `get_revenue_stats` tool. [7827a8b]
-    - [ ] Implement `search_business_knowledge` tool.
+    - [x] Implement `search_business_knowledge` tool. [bd800b0]
     - [ ] Implement `update_initiative_status` tool.
     - [ ] Implement `create_task` tool.
 - [ ] **Task: Provision 11 System Agents**
