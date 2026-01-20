@@ -13,7 +13,7 @@ This plan outlines the phases and tasks required to implement the core multi-age
 - [~] **Task: Implement Global Tools**
     - [x] Implement `get_revenue_stats` tool. [7827a8b]
     - [x] Implement `search_business_knowledge` tool. [bd800b0]
-    - [ ] Implement `update_initiative_status` tool.
+    - [x] Implement `update_initiative_status` tool. [d76bfdd]
     - [ ] Implement `create_task` tool.
 - [ ] **Task: Provision 11 System Agents**
     - [ ] Write a script to seed the `agents` table with the 11 system agents, their roles, and system prompts as defined in `Cloud-Agent-Setup.md`.
