@@ -15,9 +15,9 @@ This plan outlines the phases and tasks required to implement the core multi-age
     - [x] Implement `search_business_knowledge` tool. [bd800b0]
     - [x] Implement `update_initiative_status` tool. [d76bfdd]
     - [x] Implement `create_task` tool. [7987644]
-- [~] **Task: Provision 11 System Agents**
+- [x] **Task: Provision 11 System Agents**
     - [x] Write a script to seed the `agents` table with the 11 system agents, their roles, and system prompts as defined in `Cloud-Agent-Setup.md`.
-    - [ ] Verify that all 11 agents are correctly provisioned in the database.
+    - [x] Verify that all 11 agents are correctly provisioned in the database.
 
 ## Phase 2: Knowledge Vault (RAG) Implementation
 
