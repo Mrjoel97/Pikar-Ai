@@ -10,8 +10,8 @@ This plan outlines the phases and tasks required to implement the core multi-age
     - [x] Create `agent_knowledge` table for storing training data.
     - [x] Create `embeddings` table for storing vector embeddings.
     - [x] Create `ai_jobs` table for tracking agent tasks.
-- [ ] **Task: Implement Global Tools**
-    - [ ] Implement `get_revenue_stats` tool.
+- [~] **Task: Implement Global Tools**
+    - [x] Implement `get_revenue_stats` tool. [7827a8b]
     - [ ] Implement `search_business_knowledge` tool.
     - [ ] Implement `update_initiative_status` tool.
     - [ ] Implement `create_task` tool.
