@@ -20,6 +20,7 @@ from google.genai import types
 
 import os
 import google.auth
+import uuid
 
 os.environ["GOOGLE_CLOUD_PROJECT"] = "my-project-pk-484623"
 os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
@@ -42,7 +43,10 @@ def update_initiative_status(initiative_id: str, status: str) -> dict:
 
 def create_task(description: str) -> dict:
     """Creates a new task."""
-    return {"description": description}
+    # In a real implementation, this would create a task in a database.
+    task_id = str(uuid.uuid4())
+    print(f"Created task '{description}' with id {task_id}")
+    return {"task_id": task_id}
 
 
 executive_agent = Agent(

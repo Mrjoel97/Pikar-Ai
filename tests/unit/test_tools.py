@@ -21,5 +21,9 @@ def test_update_initiative_status_returns_success():
     assert "success" in result
     assert result["success"] is True
 
-def test_create_task():
-    assert isinstance(create_task("test task"), dict)
+def test_create_task_returns_task_id():
+    """Tests that create_task returns a dictionary with a 'task_id' key."""
+    result = create_task("test task")
+    assert isinstance(result, dict)
+    assert "task_id" in result
+    assert isinstance(result["task_id"], str)
