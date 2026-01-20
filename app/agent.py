@@ -32,7 +32,7 @@ def get_revenue_stats() -> dict:
 
 def search_business_knowledge(query: str) -> dict:
     """Searches for business knowledge."""
-    return {"query": query}
+    return {"results": []}
 
 def update_initiative_status(initiative_id: str, status: str) -> dict:
     """Updates the status of an initiative."""

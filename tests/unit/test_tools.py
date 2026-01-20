@@ -7,8 +7,12 @@ def test_get_revenue_stats():
     assert "revenue" in stats
     assert isinstance(stats["revenue"], float)
 
-def test_search_business_knowledge():
-    assert isinstance(search_business_knowledge("test"), dict)
+def test_search_business_knowledge_returns_results():
+    """Tests that search_business_knowledge returns a dictionary with a 'results' key."""
+    result = search_business_knowledge("test query")
+    assert isinstance(result, dict)
+    assert "results" in result
+    assert isinstance(result["results"], list)
 
 def test_update_initiative_status():
     assert isinstance(update_initiative_status("test_id", "in_progress"), dict)
