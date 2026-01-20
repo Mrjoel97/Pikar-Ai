@@ -5,11 +5,11 @@ This plan outlines the phases and tasks required to implement the core multi-age
 ## Phase 1: Foundational Setup & Agent Provisioning
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Foundational Setup & Agent Provisioning' (Protocol in workflow.md)
-- [ ] **Task: Set up Database Schema**
-    - [ ] Create `agents` table with columns for name, role, system_prompt, etc.
-    - [ ] Create `agent_knowledge` table for storing training data.
-    - [ ] Create `embeddings` table for storing vector embeddings.
-    - [ ] Create `ai_jobs` table for tracking agent tasks.
+- [x] **Task: Set up Database Schema** [a15023b]
+    - [x] Create `agents` table with columns for name, role, system_prompt, etc.
+    - [x] Create `agent_knowledge` table for storing training data.
+    - [x] Create `embeddings` table for storing vector embeddings.
+    - [x] Create `ai_jobs` table for tracking agent tasks.
 - [ ] **Task: Implement Global Tools**
     - [ ] Implement `get_revenue_stats` tool.
     - [ ] Implement `search_business_knowledge` tool.
