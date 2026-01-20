@@ -36,7 +36,9 @@ def search_business_knowledge(query: str) -> dict:
 
 def update_initiative_status(initiative_id: str, status: str) -> dict:
     """Updates the status of an initiative."""
-    return {"initiative_id": initiative_id, "status": status}
+    # In a real implementation, this would update a database.
+    print(f"Updating initiative {initiative_id} to {status}")
+    return {"success": True}
 
 def create_task(description: str) -> dict:
     """Creates a new task."""

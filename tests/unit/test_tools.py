@@ -14,8 +14,12 @@ def test_search_business_knowledge_returns_results():
     assert "results" in result
     assert isinstance(result["results"], list)
 
-def test_update_initiative_status():
-    assert isinstance(update_initiative_status("test_id", "in_progress"), dict)
+def test_update_initiative_status_returns_success():
+    """Tests that update_initiative_status returns a dictionary with a 'success' key."""
+    result = update_initiative_status("test_id", "in_progress")
+    assert isinstance(result, dict)
+    assert "success" in result
+    assert result["success"] is True
 
 def test_create_task():
     assert isinstance(create_task("test task"), dict)
