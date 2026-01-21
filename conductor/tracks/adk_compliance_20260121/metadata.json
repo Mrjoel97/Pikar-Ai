@@ -1,0 +1,8 @@
+{
+  "id": "adk_compliance_20260121",
+  "type": "remediation",
+  "status": "active",
+  "created": "2026-01-21",
+  "updated": "2026-01-21",
+  "description": "Remediate ADK standards compliance gaps in core_agent_ecosystem track"
+}
