@@ -315,8 +315,6 @@ BEHAVIOR:
 - Quantify uncertainty in predictions.""",
     tools=[_get_revenue_stats, _search_knowledge],
 )
-
-
 # =============================================================================
 # Export all specialized agents
 # =============================================================================
