@@ -19,9 +19,9 @@ This plan outlines the phases and tasks required to implement the core multi-age
     - [x] Write a script to seed the `agents` table with the 11 system agents, their roles, and system prompts as defined in `Cloud-Agent-Setup.md`.
     - [x] Verify that all 11 agents are correctly provisioned in the database.
 
-## Phase 2: Knowledge Vault (RAG) Implementation
+## Phase 2: Knowledge Vault (RAG) Implementation [checkpoint: da8bd5e]
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Vault (RAG) Implementation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Vault (RAG) Implementation' (Protocol in workflow.md)
 - [x] **Task: Implement RAG Pipeline** [cf68b68]
     - [x] Implement a service for generating embeddings using Google's `text-embedding-004` model.
     - [x] Implement a service for ingesting documents, chunking them, generating embeddings, and storing them in the `embeddings` table.
