@@ -10,7 +10,7 @@ This plan addresses the gaps identified in the ADK standards compliance review.
     - [x] Remove custom delegation logging (ADK handles delegation natively)
     - [x] Update tests to verify sub_agents hierarchy
 
-## Phase 2: Tool Signature Compliance [COMPLETE]
+## Phase 2: Tool Signature Compliance [COMPLETE] [70e5ae8]
 
 - [x] Task: Conductor - User Manual Verification (Protocol in workflow.md)
 - [x] **Task: Fix Tool Signatures per ADK Standards**
