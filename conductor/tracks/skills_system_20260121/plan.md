@@ -9,7 +9,7 @@ Implement a robust Skills System (.agent/skills) to automate Conductor workflows
 - [x] Implement `scaffold_feature` skill (TDD enforcement) [bbf271e]
 
 ## Phase 2: Integration [OBSOLETE]
-- [ ] Update `DynamicWorkflowGenerator` to use Skills
+- [~] Update `DynamicWorkflowGenerator` to use Skills
 - [ ] Verify end-to-end automation
 
 ## Phase 3: Verification of ADK Compliance Workflows
