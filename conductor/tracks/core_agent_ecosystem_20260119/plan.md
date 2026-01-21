@@ -22,13 +22,13 @@ This plan outlines the phases and tasks required to implement the core multi-age
 ## Phase 2: Knowledge Vault (RAG) Implementation
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Knowledge Vault (RAG) Implementation' (Protocol in workflow.md)
-- [ ] **Task: Implement RAG Pipeline**
-    - [ ] Implement a service for generating embeddings using Google's `text-embedding-004` model.
-    - [ ] Implement a service for ingesting documents, chunking them, generating embeddings, and storing them in the `embeddings` table.
-    - [ ] Implement a semantic search service that retrieves relevant document chunks based on a query.
-- [ ] **Task: Implement Knowledge Vault Ingestion**
-    - [ ] Implement the logic for ingesting brain dumps and other knowledge sources into the Knowledge Vault.
-    - [ ] Test the ingestion and retrieval process with a sample document.
+- [x] **Task: Implement RAG Pipeline** [cf68b68]
+    - [x] Implement a service for generating embeddings using Google's `text-embedding-004` model.
+    - [x] Implement a service for ingesting documents, chunking them, generating embeddings, and storing them in the `embeddings` table.
+    - [x] Implement a semantic search service that retrieves relevant document chunks based on a query.
+- [x] **Task: Implement Knowledge Vault Ingestion** [f48114b]
+    - [x] Implement the logic for ingesting brain dumps and other knowledge sources into the Knowledge Vault.
+    - [x] Test the ingestion and retrieval process with a sample document.
 
 ## Phase 3: Executive Agent & Orchestration Logic
 
