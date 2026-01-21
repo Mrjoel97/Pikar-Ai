@@ -4,7 +4,7 @@
 Replace mock tools with real, database-backed services (`app/services/`) to enable functional specialized agents.
 
 ## Phase 1: Financial Service (FinancialAnalysisAgent)
-- [~] Scaffold `financial_service` feature (TDD)
+- [x] Scaffold `financial_service` feature (TDD) [f25ac35]
 - [ ] Implement `FinancialService` class (Supabase connection)
 - [ ] Implement `get_revenue_stats` and `get_expense_stats` real logic
 - [ ] Update `FinancialAnalysisAgent` to use `FinancialService`
