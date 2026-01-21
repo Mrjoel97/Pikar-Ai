@@ -1,6 +1,13 @@
 
+import sys
+from unittest.mock import MagicMock
+
+# Mock google.adk components to bypass app/__init__.py side-effects
+sys.modules["google.adk"] = MagicMock()
+sys.modules["google.adk.agents"] = MagicMock()
+
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from app.services.financial_service import FinancialService
 
 @patch("app.services.financial_service.create_client")
