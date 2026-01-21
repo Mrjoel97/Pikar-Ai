@@ -27,6 +27,9 @@ from google.genai import types
 import os
 import uuid
 
+# Import specialized agents for sub_agents hierarchy
+from app.agents.specialized_agents import SPECIALIZED_AGENTS
+
 # Configure Vertex AI
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "my-project-pk-484623")
 os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
@@ -108,47 +111,7 @@ def create_task(description: str, assignee: str = None, priority: str = "medium"
     }
 
 
-# =============================================================================
-# Orchestration Tools
-# =============================================================================
-
-def get_available_agents() -> dict:
-    """Get list of all specialized agents available for delegation.
-    
-    Use this to understand which agents are available and their capabilities
-    before delegating a task.
-    
-    Returns:
-        Dictionary containing list of agents with names and roles.
-    """
-    from app.orchestration.tools import get_available_agents as _get_agents
-    return _get_agents()
-
-
-def delegate_to_agent(agent_name: str, task_description: str) -> dict:
-    """Delegate a specific task to a specialized agent.
-    
-    Use this when a task is better handled by a specialist:
-    - Financial Analysis Agent: Revenue analysis, forecasting, financial health
-    - Content Creation Agent: Marketing copy, blog posts, social media
-    - Strategic Planning Agent: OKRs, long-term goals, initiatives
-    - Sales Intelligence Agent: Deal scoring, lead analysis, outreach
-    - Marketing Automation Agent: Campaigns, audience targeting
-    - Operations Optimization Agent: Process improvement, efficiency
-    - HR & Recruitment Agent: Hiring, candidate evaluation
-    - Compliance & Risk Agent: Legal guidance, audit, risk assessment
-    - Customer Support Agent: Ticket triage, knowledge base
-    - Data Analysis Agent: Data validation, anomaly detection, forecasting
-    
-    Args:
-        agent_name: Name of the specialized agent (e.g., "Financial Analysis Agent").
-        task_description: Clear description of what the agent should do.
-        
-    Returns:
-        Dictionary with delegation status.
-    """
-    from app.orchestration.tools import delegate_to_agent as _delegate
-    return _delegate(agent_name, task_description)
+# NOTE: Orchestration tools removed - ADK handles delegation natively via sub_agents
 
 
 # =============================================================================
@@ -164,27 +127,29 @@ You are the primary interface between the user and Pikar AI's multi-agent ecosys
 1. **Business Intelligence**: Monitor business health using 'get_revenue_stats'
 2. **Knowledge Access**: Search the Knowledge Vault using 'search_business_knowledge' for context and history
 3. **Project Management**: Track initiatives with 'update_initiative_status' and create tasks with 'create_task'
-4. **Agent Orchestration**: View available agents with 'get_available_agents' and delegate using 'delegate_to_agent'
+4. **Agent Delegation**: You have specialized sub-agents that you can delegate to naturally (the system handles routing automatically)
 
 ## BEHAVIOR GUIDELINES
 - Be concise, strategic, and decisive
 - ALWAYS check 'search_business_knowledge' before asking the user for context
-- Delegate to specialized agents when tasks require domain expertise
-- Provide clear summaries of delegated work and next steps
+- When tasks require domain expertise, describe what needs to be done and the appropriate specialist will be invoked
+- Provide clear summaries of work and next steps
 - Think like a Chief of Staff - anticipate needs and coordinate effectively
 
-## DELEGATION RULES
-Before handling a request yourself, consider if a specialist would be better:
-- Financial questions → Financial Analysis Agent
-- Content creation → Content Creation Agent  
-- Strategic planning → Strategic Planning Agent
-- Sales tasks → Sales Intelligence Agent
-- Marketing campaigns → Marketing Automation Agent
-- Operations/efficiency → Operations Optimization Agent
-- HR/hiring → HR & Recruitment Agent
-- Legal/compliance → Compliance & Risk Agent
-- Support tickets → Customer Support Agent
-- Data analysis → Data Analysis Agent
+## AVAILABLE SPECIALISTS (Sub-Agents)
+The following specialists are available for delegation:
+- FinancialAnalysisAgent: Revenue, costs, forecasting, financial health
+- ContentCreationAgent: Marketing copy, blog posts, social media content
+- StrategicPlanningAgent: OKRs, long-term goals, initiative tracking
+- SalesIntelligenceAgent: Deal scoring, lead analysis, sales enablement
+- MarketingAutomationAgent: Campaigns, content scheduling, audience targeting
+- OperationsOptimizationAgent: Process improvement, efficiency, rollout planning
+- HRRecruitmentAgent: Hiring, candidate evaluation, onboarding
+- ComplianceRiskAgent: Legal compliance, risk assessment, regulatory guidance
+- CustomerSupportAgent: Ticket triage, knowledge base, support metrics
+- DataAnalysisAgent: Data validation, anomaly detection, forecasting
+
+Simply describe the task and the system will route to the appropriate specialist.
 """
 
 executive_agent = Agent(
@@ -201,10 +166,9 @@ executive_agent = Agent(
         search_business_knowledge,
         update_initiative_status,
         create_task,
-        # Orchestration tools
-        get_available_agents,
-        delegate_to_agent,
     ],
+    # Native ADK sub_agents hierarchy - delegation handled automatically
+    sub_agents=SPECIALIZED_AGENTS,
 )
 
 # Create the application
