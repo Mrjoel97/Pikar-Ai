@@ -89,16 +89,17 @@ def update_initiative_status(initiative_id: str, status: str) -> dict:
     return {"success": True, "initiative_id": initiative_id, "new_status": status}
 
 
-def create_task(description: str, assignee: str = None, priority: str = "medium") -> dict:
+def create_task(description: str, assignee: str, priority: str) -> dict:
     """Creates a new task in the task management system.
     
     Args:
         description: Clear description of what needs to be done.
-        assignee: Optional - who should work on this task.
-        priority: Task priority (low, medium, high, urgent).
+        assignee: Who should work on this task (use 'unassigned' if no specific person).
+        priority: Task priority - must be one of: low, medium, high, urgent.
         
     Returns:
-        Dictionary with the created task details.
+        Dictionary with the created task details including task_id, description,
+        assignee, priority, and status.
     """
     task_id = str(uuid.uuid4())
     print(f"Created task '{description}' with id {task_id}")

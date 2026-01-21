@@ -38,7 +38,11 @@ def get_model(model_name: str = "gemini-1.5-flash") -> Gemini:
 # =============================================================================
 
 def _get_revenue_stats() -> dict:
-    """Get revenue statistics."""
+    """Get revenue statistics for financial analysis.
+    
+    Returns:
+        Dictionary containing revenue amount, currency, period, and trend.
+    """
     return {"revenue": 1000.0, "currency": "USD", "period": "current_month"}
 
 financial_agent = Agent(
@@ -64,7 +68,14 @@ BEHAVIOR:
 # =============================================================================
 
 def _search_knowledge(query: str) -> dict:
-    """Search business knowledge."""
+    """Search business knowledge base for relevant information.
+    
+    Args:
+        query: The search query to find relevant business knowledge.
+        
+    Returns:
+        Dictionary containing search results.
+    """
     try:
         from app.rag.knowledge_vault import search_knowledge
         return search_knowledge(query, top_k=3)
@@ -95,7 +106,15 @@ BEHAVIOR:
 # =============================================================================
 
 def _update_initiative(initiative_id: str, status: str) -> dict:
-    """Update initiative status."""
+    """Update initiative status in the system.
+    
+    Args:
+        initiative_id: The unique identifier of the initiative.
+        status: The new status (e.g., 'in_progress', 'completed', 'blocked').
+        
+    Returns:
+        Dictionary confirming the status update.
+    """
     return {"success": True, "initiative_id": initiative_id, "new_status": status}
 
 strategic_agent = Agent(
@@ -122,7 +141,14 @@ BEHAVIOR:
 # =============================================================================
 
 def _create_task(description: str) -> dict:
-    """Create a new task."""
+    """Create a new task in the task management system.
+    
+    Args:
+        description: Clear description of what needs to be done.
+        
+    Returns:
+        Dictionary containing task_id and description.
+    """
     import uuid
     return {"task_id": str(uuid.uuid4()), "description": description}
 
