@@ -113,13 +113,44 @@ BEHAVIOR:
 - Match the user's brand voice (Corporate, Witty, Academic, etc.).
 - Optimize for engagement and SEO.
 - Be creative but on-brand.""",
-    tools=[_search_knowledge],
+
+async def _save_content(title: str, content: str) -> dict:
+    """Save generated content to the Knowledge Vault via ContentService.
+    
+    Args:
+        title: Title of the content.
+        content: The text content to save.
+        
+    Returns:
+        Dictionary confirming save status.
+    """
+    from app.services.content_service import ContentService
+    
+    try:
+        service = ContentService()
+        # agent_id placeholder until context injection
+        result = await service.save_content(title, content, agent_id="content-agent")
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+content_agent = Agent(
+    name="ContentCreationAgent",
+    model=get_model(),
+    description="CMO / Creative Director - Creates marketing copy, blog posts, and social media content",
+    instruction="""You are the Content Creation Agent. You generate high-quality marketing copy, blog posts, and social media content.
+
+CAPABILITIES:
+- Draft content based on brand voice from 'search_business_knowledge'.
+- Save final drafts using 'save_content'.
+- Create content calendars.
+
+BEHAVIOR:
+- Match the user's brand voice.
+- Optimize for engagement and SEO.
+- Always save your best work.""",
+    tools=[_search_knowledge, _save_content],
 )
-
-
-# =============================================================================
-# Strategic Planning Agent
-# =============================================================================
 
 def _update_initiative(initiative_id: str, status: str) -> dict:
     """Update initiative status in the system.

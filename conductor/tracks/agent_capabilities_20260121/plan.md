@@ -10,7 +10,7 @@ Replace mock tools with real, database-backed services (`app/services/`) to enab
 - [x] Update `FinancialAnalysisAgent` to use `FinancialService` [0fa0863]
 
 ## Phase 2: Task & CRM Service (Sales/Operations Agents)
-- [ ] Scaffold `task_service` feature (TDD)
+- [~] Scaffold `task_service` feature (TDD)
 - [ ] Implement `TaskService` (CRUD for `ai_jobs` or new `tasks` table)
 - [ ] Update `SalesAgent` and `OperationsAgent` to use `TaskService`
 
