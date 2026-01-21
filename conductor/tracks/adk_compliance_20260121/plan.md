@@ -27,7 +27,7 @@ This plan addresses the gaps identified in the ADK standards compliance review.
     - [x] Add `EventsCompactionConfig` for conversation history management
     - [x] Add `ResumabilityConfig` for workflow recovery (optional)
 
-## Phase 4: Workflow Agents Implementation (PRD-Based) [COMPLETE]
+## Phase 4: Workflow Agents Implementation (PRD-Based) [COMPLETE] [bc30dc7]
 
 **Scope:** 53 workflows + DynamicWorkflowGenerator (see [workflow_catalog.md](workflow_catalog.md))
 
