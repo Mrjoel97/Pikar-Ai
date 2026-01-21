@@ -4,7 +4,7 @@
 Implement a robust Skills System (.agent/skills) to automate Conductor workflows and ensure strict adherence to engineering standards.
 
 ## Phase 1: Conductor Automation
-- [~] Implement `conductor_task` skill (Task management)
+- [x] Implement `conductor_task` skill (Task management) [2c80a0c]
 - [ ] Implement `conductor_phase` skill (Checkpointing)
 - [ ] Implement `scaffold_feature` skill (TDD enforcement)
 
