@@ -2,7 +2,7 @@
 
 This plan addresses the gaps identified in the ADK standards compliance review.
 
-## Phase 1: Native Multi-Agent Hierarchy [COMPLETE]
+## Phase 1: Native Multi-Agent Hierarchy [COMPLETE] [e73bc8b]
 
 - [x] Task: Conductor - User Manual Verification (Protocol in workflow.md)
 - [x] **Task: Integrate Specialized Agents as sub_agents**
@@ -10,7 +10,7 @@ This plan addresses the gaps identified in the ADK standards compliance review.
     - [x] Remove custom delegation logging (ADK handles delegation natively)
     - [x] Update tests to verify sub_agents hierarchy
 
-## Phase 2: Tool Signature Compliance [NEW]
+## Phase 2: Tool Signature Compliance [IN PROGRESS]
 
 - [ ] Task: Conductor - User Manual Verification (Protocol in workflow.md)
 - [ ] **Task: Fix Tool Signatures per ADK Standards**
