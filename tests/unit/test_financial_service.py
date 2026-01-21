@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 # Mock google.adk components to bypass app/__init__.py side-effects
 sys.modules["google.adk"] = MagicMock()
 sys.modules["google.adk.agents"] = MagicMock()
+sys.modules["google.adk.apps"] = MagicMock()
 
 import pytest
 from unittest.mock import patch
