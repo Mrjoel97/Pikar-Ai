@@ -12,14 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import pytest
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from app.agent import root_agent
+from app.agent import executive_agent
 
 
+@pytest.mark.skipif(
+    not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
+    reason="Requires Google Cloud credentials"
+)
 def test_agent_stream() -> None:
     """
     Integration test for the agent stream functionality.
@@ -29,7 +35,7 @@ def test_agent_stream() -> None:
     session_service = InMemorySessionService()
 
     session = session_service.create_session_sync(user_id="test_user", app_name="test")
-    runner = Runner(agent=root_agent, session_service=session_service, app_name="test")
+    runner = Runner(agent=executive_agent, session_service=session_service, app_name="test")
 
     message = types.Content(
         role="user", parts=[types.Part.from_text(text="Why is the sky blue?")]

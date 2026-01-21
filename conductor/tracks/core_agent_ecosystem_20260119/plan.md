@@ -44,7 +44,7 @@ This plan outlines the phases and tasks required to implement the core multi-age
 ## Phase 4: Integration and Testing
 
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Integration and Testing' (Protocol in workflow.md)
-- [ ] **Task: Integrate All System Agents**
+- [~] **Task: Integrate All System Agents**
     - [ ] Ensure that all 11 system agents can be invoked by the Executive Agent.
     - [ ] Test the functionality of each system agent with a sample task.
 - [ ] **Task: Comprehensive End-to-End Testing**
