@@ -37,13 +37,29 @@ def get_model(model_name: str = "gemini-1.5-flash") -> Gemini:
 # Financial Analysis Agent
 # =============================================================================
 
-def _get_revenue_stats() -> dict:
-    """Get revenue statistics for financial analysis.
+async def _get_revenue_stats(period: str = "current_month") -> dict:
+    """Get revenue statistics for financial analysis from FinancialService.
+    
+    Args:
+        period: Time period for revenue stats (default: current_month).
     
     Returns:
-        Dictionary containing revenue amount, currency, period, and trend.
+        Dictionary containing revenue amount, currency, period, and status.
     """
-    return {"revenue": 1000.0, "currency": "USD", "period": "current_month"}
+    from app.services.financial_service import FinancialService
+    
+    try:
+        service = FinancialService()
+        stats = await service.get_revenue_stats(period)
+        return stats
+    except Exception as e:
+        # Fallback to informative error response
+        return {
+            "revenue": 0.0,
+            "currency": "USD",
+            "period": period,
+            "error": f"Service unavailable: {str(e)}"
+        }
 
 financial_agent = Agent(
     name="FinancialAnalysisAgent",
