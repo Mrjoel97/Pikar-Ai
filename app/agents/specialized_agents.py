@@ -156,17 +156,33 @@ BEHAVIOR:
 # Sales Intelligence Agent
 # =============================================================================
 
-def _create_task(description: str) -> dict:
-    """Create a new task in the task management system.
+async def _create_task(description: str) -> dict:
+    """Create a new task in the task management system via TaskService.
     
     Args:
         description: Clear description of what needs to be done.
         
     Returns:
-        Dictionary containing task_id and description.
+        Dictionary containing task_id, status, and description.
     """
-    import uuid
-    return {"task_id": str(uuid.uuid4()), "description": description}
+    from app.services.task_service import TaskService
+    
+    try:
+        service = TaskService()
+        # agent_id is None for now as we don't have context injection yet
+        task = await service.create_task(description, agent_id=None)
+        return {
+            "task_id": task["id"],
+            "status": task["status"],
+            "description": description,
+            "success": True
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to create task: {str(e)}",
+            "description": description,
+            "success": False
+        }
 
 sales_agent = Agent(
     name="SalesIntelligenceAgent",

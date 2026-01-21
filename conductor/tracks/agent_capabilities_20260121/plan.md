@@ -7,7 +7,7 @@ Replace mock tools with real, database-backed services (`app/services/`) to enab
 - [x] Scaffold `financial_service` feature (TDD) [f25ac35]
 - [x] Implement `FinancialService` class (Supabase connection) [7459a57]
 - [x] Implement `get_revenue_stats` and `get_expense_stats` real logic [e2cf14d]
-- [ ] Update `FinancialAnalysisAgent` to use `FinancialService`
+- [~] Update `FinancialAnalysisAgent` to use `FinancialService`
 
 ## Phase 2: Task & CRM Service (Sales/Operations Agents)
 - [ ] Scaffold `task_service` feature (TDD)
