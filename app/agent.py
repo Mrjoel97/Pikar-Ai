@@ -24,6 +24,10 @@ from google.adk.apps import App
 from google.adk.models import Gemini
 from google.genai import types
 
+# Production App configuration imports
+from google.adk.agents.context_cache_config import ContextCacheConfig
+from google.adk.apps.events_compaction_config import EventsCompactionConfig
+
 import os
 import uuid
 
@@ -172,5 +176,18 @@ executive_agent = Agent(
     sub_agents=SPECIALIZED_AGENTS,
 )
 
-# Create the application
-app = App(root_agent=executive_agent, name="app")
+# Create the production application with ADK best practices
+app = App(
+    root_agent=executive_agent,
+    name="pikar_ai",
+    # Reduce costs/latency for long contexts by caching
+    context_cache_config=ContextCacheConfig(
+        min_tokens=2048,    # Minimum tokens before caching kicks in
+        ttl_seconds=600     # Cache TTL: 10 minutes
+    ),
+    # Manage long conversation history automatically
+    events_compaction_config=EventsCompactionConfig(
+        compaction_interval=5,  # Compact every 5 events
+        overlap_size=1          # Keep 1 event overlap for context
+    ),
+)
