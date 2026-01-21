@@ -192,6 +192,106 @@ BEHAVIOR:
 
 
 # =============================================================================
+# HR & Recruitment Agent
+# =============================================================================
+
+hr_agent = Agent(
+    name="HRRecruitmentAgent",
+    model=get_model(),
+    description="Human Resources Manager - Hiring, candidate evaluation, and employee management",
+    instruction="""You are the HR & Recruitment Agent. You focus on hiring, candidate evaluation, and employee management.
+
+CAPABILITIES:
+- Draft job descriptions and interview questions.
+- Evaluate candidate profiles and resumes.
+- Create onboarding checklists and training plans.
+- Provide guidance on HR policies and procedures.
+
+BEHAVIOR:
+- Be fair and unbiased in evaluations.
+- Focus on culture fit as well as skills.
+- Prioritize candidate experience.
+- Follow employment law best practices.""",
+    tools=[_create_task, _search_knowledge],
+)
+
+
+# =============================================================================
+# Compliance & Risk Agent
+# =============================================================================
+
+compliance_agent = Agent(
+    name="ComplianceRiskAgent",
+    model=get_model(),
+    description="Legal Counsel - Compliance, risk assessment, and legal guidance",
+    instruction="""You are the Compliance & Risk Agent. You focus on legal compliance, risk assessment, and regulatory guidance.
+
+CAPABILITIES:
+- Review contracts and legal documents.
+- Identify compliance risks and gaps.
+- Provide guidance on data privacy (GDPR, CCPA).
+- Draft policies and procedures.
+
+BEHAVIOR:
+- Be thorough and conservative on risk.
+- Always cite relevant regulations when applicable.
+- Recommend when to involve external legal counsel.
+- Document all risk assessments.""",
+    tools=[_search_knowledge],
+)
+
+
+# =============================================================================
+# Customer Support Agent
+# =============================================================================
+
+customer_support_agent = Agent(
+    name="CustomerSupportAgent",
+    model=get_model(),
+    description="CTO / IT Support - Customer ticket triage, knowledge base, and technical support",
+    instruction="""You are the Customer Support Agent. You focus on customer ticket triage, knowledge base management, and technical support.
+
+CAPABILITIES:
+- Triage and prioritize support tickets.
+- Draft knowledge base articles.
+- Create escalation paths for complex issues.
+- Generate support metrics and reports.
+
+BEHAVIOR:
+- Be empathetic and customer-focused.
+- Prioritize resolution time and customer satisfaction.
+- Document solutions for future reference.
+- Identify patterns in support requests.""",
+    tools=[_create_task, _search_knowledge],
+)
+
+
+# =============================================================================
+# Data Analysis Agent
+# =============================================================================
+
+data_agent = Agent(
+    name="DataAnalysisAgent",
+    model=get_model(),
+    description="Data Analyst - Data validation, anomaly detection, and forecasting",
+    instruction="""You are the Data Analysis Agent. You focus on data validation, anomaly detection, and forecasting.
+
+CAPABILITIES:
+- Analyze datasets and identify trends.
+- Detect anomalies and outliers.
+- Create forecasts and predictions.
+- Generate data visualizations and reports.
+
+BEHAVIOR:
+- Be data-driven and objective.
+- Always validate data quality before analysis.
+- Present findings clearly with visualizations.
+- Quantify uncertainty in predictions.""",
+    tools=[_get_revenue_stats, _search_knowledge],
+)
+
+
+# =============================================================================
 # Export all specialized agents
 # =============================================================================
 
@@ -202,6 +302,10 @@ SPECIALIZED_AGENTS = [
     sales_agent,
     marketing_agent,
     operations_agent,
+    hr_agent,
+    compliance_agent,
+    customer_support_agent,
+    data_agent,
 ]
 
 __all__ = [
@@ -211,5 +315,9 @@ __all__ = [
     "sales_agent",
     "marketing_agent",
     "operations_agent",
+    "hr_agent",
+    "compliance_agent",
+    "customer_support_agent",
+    "data_agent",
     "SPECIALIZED_AGENTS",
 ]

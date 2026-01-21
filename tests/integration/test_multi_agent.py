@@ -42,10 +42,11 @@ class TestAgentIntegration:
         assert "delegate_to_agent" in tool_names
 
     def test_specialized_agents_are_defined(self):
-        """Test that all specialized agents are properly defined."""
+        """Test that all 10 specialized agents are properly defined."""
         from app.agents import SPECIALIZED_AGENTS
         
-        assert len(SPECIALIZED_AGENTS) >= 6
+        # Should have exactly 10 specialized agents
+        assert len(SPECIALIZED_AGENTS) == 10
         
         agent_names = [agent.name for agent in SPECIALIZED_AGENTS]
         assert "FinancialAnalysisAgent" in agent_names
@@ -54,6 +55,10 @@ class TestAgentIntegration:
         assert "SalesIntelligenceAgent" in agent_names
         assert "MarketingAutomationAgent" in agent_names
         assert "OperationsOptimizationAgent" in agent_names
+        assert "HRRecruitmentAgent" in agent_names
+        assert "ComplianceRiskAgent" in agent_names
+        assert "CustomerSupportAgent" in agent_names
+        assert "DataAnalysisAgent" in agent_names
 
     def test_delegation_to_financial_agent(self):
         """Test delegating a task to the Financial Analysis Agent."""
@@ -85,6 +90,50 @@ class TestAgentIntegration:
         result = delegate_to_agent(
             agent_name="Strategic Planning Agent",
             task_description="Define Q2 OKRs for the product team"
+        )
+        
+        assert result["success"] is True
+
+    def test_delegation_to_hr_agent(self):
+        """Test delegating a task to the HR & Recruitment Agent."""
+        from app.orchestration.tools import delegate_to_agent
+        
+        result = delegate_to_agent(
+            agent_name="HR & Recruitment Agent",
+            task_description="Draft job description for senior engineer role"
+        )
+        
+        assert result["success"] is True
+
+    def test_delegation_to_compliance_agent(self):
+        """Test delegating a task to the Compliance & Risk Agent."""
+        from app.orchestration.tools import delegate_to_agent
+        
+        result = delegate_to_agent(
+            agent_name="Compliance & Risk Agent",
+            task_description="Review GDPR compliance for new feature"
+        )
+        
+        assert result["success"] is True
+
+    def test_delegation_to_customer_support_agent(self):
+        """Test delegating a task to the Customer Support Agent."""
+        from app.orchestration.tools import delegate_to_agent
+        
+        result = delegate_to_agent(
+            agent_name="Customer Support Agent",
+            task_description="Create knowledge base article for login issues"
+        )
+        
+        assert result["success"] is True
+
+    def test_delegation_to_data_agent(self):
+        """Test delegating a task to the Data Analysis Agent."""
+        from app.orchestration.tools import delegate_to_agent
+        
+        result = delegate_to_agent(
+            agent_name="Data Analysis Agent",
+            task_description="Analyze user engagement trends for Q4"
         )
         
         assert result["success"] is True

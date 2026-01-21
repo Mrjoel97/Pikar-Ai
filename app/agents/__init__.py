@@ -21,6 +21,10 @@ from app.agents.specialized_agents import (
     sales_agent,
     marketing_agent,
     operations_agent,
+    hr_agent,
+    compliance_agent,
+    customer_support_agent,
+    data_agent,
     SPECIALIZED_AGENTS,
 )
 
@@ -31,5 +35,9 @@ __all__ = [
     "sales_agent",
     "marketing_agent",
     "operations_agent",
+    "hr_agent",
+    "compliance_agent",
+    "customer_support_agent",
+    "data_agent",
     "SPECIALIZED_AGENTS",
 ]
