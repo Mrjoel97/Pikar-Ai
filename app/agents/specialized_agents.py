@@ -113,11 +113,70 @@ async def _save_content(title: str, content: str) -> dict:
     
     try:
         service = ContentService()
-        # agent_id placeholder until context injection
         result = await service.save_content(title, content, agent_id="content-agent")
         return result
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+async def _get_content(content_id: str) -> dict:
+    """Retrieve saved content by its ID.
+    
+    Args:
+        content_id: The unique ID of the content.
+        
+    Returns:
+        Dictionary containing the content record.
+    """
+    from app.services.content_service import ContentService
+    
+    try:
+        service = ContentService()
+        result = await service.get_content(content_id)
+        return {"success": True, "content": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _update_content(content_id: str, title: str = None, content: str = None) -> dict:
+    """Update existing content.
+    
+    Args:
+        content_id: The unique ID of the content.
+        title: New title (optional).
+        content: New content text (optional).
+        
+    Returns:
+        Dictionary with updated content.
+    """
+    from app.services.content_service import ContentService
+    
+    try:
+        service = ContentService()
+        result = await service.update_content(content_id, title=title, content=content)
+        return {"success": True, "content": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _list_content(content_type: str = None) -> dict:
+    """List saved content items.
+    
+    Args:
+        content_type: Optional filter by type (e.g., 'blog', 'social').
+        
+    Returns:
+        Dictionary with list of content items.
+    """
+    from app.services.content_service import ContentService
+    
+    try:
+        service = ContentService()
+        items = await service.list_content(content_type=content_type)
+        return {"success": True, "items": items, "count": len(items)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "items": []}
+
 
 content_agent = Agent(
     name="ContentCreationAgent",
@@ -126,15 +185,18 @@ content_agent = Agent(
     instruction="""You are the Content Creation Agent. You generate high-quality marketing copy, blog posts, and social media content.
 
 CAPABILITIES:
-- Draft content based on brand voice from 'search_business_knowledge'.
-- Save final drafts using 'save_content'.
-- Create content calendars.
+- Draft content based on brand voice from 'search_knowledge'.
+- Save content using 'save_content'.
+- Retrieve previously saved content using 'get_content' and 'list_content'.
+- Update existing content using 'update_content'.
+- Create content calendars and manage drafts.
 
 BEHAVIOR:
 - Match the user's brand voice.
 - Optimize for engagement and SEO.
-- Always save your best work.""",
-    tools=[_search_knowledge, _save_content],
+- Save and iterate on your best work.
+- Keep track of previously created content.""",
+    tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content],
 )
 
 def _update_initiative(initiative_id: str, status: str) -> dict:
