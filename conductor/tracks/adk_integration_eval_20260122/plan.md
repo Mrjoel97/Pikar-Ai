@@ -12,7 +12,7 @@ Formalize the `adk_a2a_app_testing.ipynb` and `evaluating_adk_agent.ipynb` noteb
 - [x] Scaffold `tests/eval_datasets` and `scripts/evaluation` [3f5cd8d]
 - [x] Create `evaluate_agent.py` script (based on `evaluating_adk_agent.ipynb`) [9b7c607]
 - [x] Create sample evaluation dataset (`recruitment_eval.json`) [04495f4]
-- [ ] Run baseline evaluation on `HRRecruitmentAgent`
+- [~] Run baseline evaluation on `HRRecruitmentAgent`
 
 ## Phase Checkpoint
 **Summary**: Integration tests and evaluation scripts fully implemented and verified.
