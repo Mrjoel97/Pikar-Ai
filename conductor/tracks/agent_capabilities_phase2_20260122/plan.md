@@ -5,7 +5,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 
 ## Phase 1: Core Business Services
 - [x] Scaffold `initiative_service` feature (TDD) [64745ee]
-- [ ] Implement `InitiativeService` class (Supabase CRUD for initiatives, OKRs)
+- [~] Implement `InitiativeService` class (Supabase CRUD for initiatives, OKRs)
 - [ ] Update `StrategicPlanningAgent` to use `InitiativeService`
 - [ ] Scaffold `campaign_service` feature (TDD)
 - [ ] Implement `CampaignService` class (Supabase CRUD for campaigns, metrics)
