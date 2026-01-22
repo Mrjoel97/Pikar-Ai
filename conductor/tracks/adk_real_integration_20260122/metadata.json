@@ -1,0 +1,7 @@
+{
+    "name": "adk_real_integration",
+    "description": "Transitioning integration tests and evaluation scripts to use real dependencies and Google Cloud Authentication.",
+    "status": "active",
+    "created_at": "2026-01-22",
+    "owner": "antigravity"
+}

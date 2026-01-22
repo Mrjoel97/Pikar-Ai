@@ -1,22 +1,12 @@
-
 import sys
 import os
 import pytest
-from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-# Mock environmental dependencies before importing the app
-# We need to mock setup_telemetry to avoid real GCP auth/OTEL setup
-with patch('app.app_utils.telemetry.setup_telemetry') as mock_setup:
-    mock_setup.return_value = None
-    
-    # Mock Google Auth and Cloud Logging
-    with patch('google.auth.default', return_value=(MagicMock(), "test-project")):
-        with patch('google.cloud.logging.Client'):
-            from app.fast_api_app import app
-            from a2a.types import Message, Role, Part, TextPart, MessageSendParams, SendStreamingMessageRequest
-            import uuid
-            import json
+from app.fast_api_app import app
+from a2a.types import Message, Role, Part, TextPart, MessageSendParams, SendStreamingMessageRequest
+import uuid
+import json
 
 client = TestClient(app)
 
