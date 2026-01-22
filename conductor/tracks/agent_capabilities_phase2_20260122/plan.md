@@ -12,7 +12,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Update `MarketingAutomationAgent` to use `CampaignService` [bb41a26]
 
 ## Phase 2: HR & Compliance Services
-- [~] Scaffold `recruitment_service` feature (TDD)
+- [x] Scaffold `recruitment_service` feature (TDD) [0f0d0bb]
 - [ ] Implement `RecruitmentService` class (job postings, candidates)
 - [ ] Update `HRRecruitmentAgent` to use `RecruitmentService`
 - [ ] Scaffold `compliance_service` feature (TDD)
