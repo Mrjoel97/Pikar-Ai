@@ -5,7 +5,7 @@ Formalize the `adk_a2a_app_testing.ipynb` and `evaluating_adk_agent.ipynb` noteb
 
 ## Phase 1: A2A Protocol Integration Testing
 - [x] Scaffold `tests/integration` directory and dependencies [bee129f]
-- [ ] Implement `test_a2a_protocol.py` (based on `adk_a2a_app_testing.ipynb`)
+- [~] Implement `test_a2a_protocol.py` (based on `adk_a2a_app_testing.ipynb`)
 - [ ] Verify A2A protocol works with local agent
 
 ## Phase 2: Agent Evaluation "IQ" Pipeline
