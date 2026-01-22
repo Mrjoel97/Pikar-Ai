@@ -16,3 +16,7 @@ Formalize the `adk_a2a_app_testing.ipynb` and `evaluating_adk_agent.ipynb` noteb
 
 ## Phase Checkpoint
 **Summary**: Integration tests and evaluation scripts fully implemented and verified.
+
+
+## Phase Checkpoint [checkpoint: 3f3f9fc]
+**Summary**: Implemented A2A Integration Tests and Agent Evaluation Pipeline.
