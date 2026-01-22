@@ -15,7 +15,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Scaffold `recruitment_service` feature (TDD) [0f0d0bb]
 - [x] Implement `RecruitmentService` class (job postings, candidates) [edfda88]
 - [x] Update `HRRecruitmentAgent` to use `RecruitmentService` [bff9aae]
-- [~] Scaffold `compliance_service` feature (TDD)
+- [x] Scaffold `compliance_service` feature (TDD) [0c2ae80]
 - [ ] Implement `ComplianceService` class (audits, risk assessments)
 - [ ] Update `ComplianceRiskAgent` to use `ComplianceService`
 
