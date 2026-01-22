@@ -22,7 +22,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 ## Phase 3: Customer & Analytics Services
 - [x] Scaffold `support_ticket_service` feature (TDD) [d9bbb11]
 - [x] Implement `SupportTicketService` class (ticket CRUD) [bc9af83]
-- [ ] Update `CustomerSupportAgent` to use `SupportTicketService`
+- [~] Update `CustomerSupportAgent` to use `SupportTicketService`
 - [ ] Scaffold `analytics_service` feature (TDD)
 - [ ] Implement `AnalyticsService` class (events, reports)
 - [ ] Update `DataAnalysisAgent` to use `AnalyticsService`
