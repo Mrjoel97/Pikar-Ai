@@ -25,7 +25,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Update `CustomerSupportAgent` to use `SupportTicketService` [6ccecf7]
 - [x] Scaffold `analytics_service` feature (TDD) [3f974a3]
 - [x] Implement `AnalyticsService` class (events, reports) [da06514]
-- [~] Update `DataAnalysisAgent` to use `AnalyticsService`
+- [x] Update `DataAnalysisAgent` to use `AnalyticsService` [715431b]
 
 
 ## Phase Checkpoint [checkpoint: 7a3c2c4]
