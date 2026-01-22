@@ -20,7 +20,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Update `ComplianceRiskAgent` to use `ComplianceService` [1a059b1]
 
 ## Phase 3: Customer & Analytics Services
-- [ ] Scaffold `support_ticket_service` feature (TDD)
+- [~] Scaffold `support_ticket_service` feature (TDD)
 - [ ] Implement `SupportTicketService` class (ticket CRUD)
 - [ ] Update `CustomerSupportAgent` to use `SupportTicketService`
 - [ ] Scaffold `analytics_service` feature (TDD)
