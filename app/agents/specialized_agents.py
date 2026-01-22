@@ -199,17 +199,90 @@ BEHAVIOR:
     tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content],
 )
 
-def _update_initiative(initiative_id: str, status: str) -> dict:
-    """Update initiative status in the system.
+
+# =============================================================================
+# Strategic Planning Agent
+# =============================================================================
+
+async def _create_initiative(title: str, description: str, priority: str = "medium") -> dict:
+    """Create a new strategic initiative.
+    
+    Args:
+        title: Title of the initiative.
+        description: Description of the initiative goals.
+        priority: Priority level (low, medium, high, critical).
+        
+    Returns:
+        Dictionary containing the created initiative.
+    """
+    from app.services.initiative_service import InitiativeService
+    
+    try:
+        service = InitiativeService()
+        initiative = await service.create_initiative(title, description, priority)
+        return {"success": True, "initiative": initiative}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _get_initiative(initiative_id: str) -> dict:
+    """Retrieve an initiative by ID.
     
     Args:
         initiative_id: The unique identifier of the initiative.
-        status: The new status (e.g., 'in_progress', 'completed', 'blocked').
+        
+    Returns:
+        Dictionary containing the initiative details.
+    """
+    from app.services.initiative_service import InitiativeService
+    
+    try:
+        service = InitiativeService()
+        initiative = await service.get_initiative(initiative_id)
+        return {"success": True, "initiative": initiative}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _update_initiative(initiative_id: str, status: str, progress: int = None) -> dict:
+    """Update initiative status and progress.
+    
+    Args:
+        initiative_id: The unique identifier of the initiative.
+        status: The new status (draft, active, completed, on_hold).
+        progress: Optional progress percentage (0-100).
         
     Returns:
         Dictionary confirming the status update.
     """
-    return {"success": True, "initiative_id": initiative_id, "new_status": status}
+    from app.services.initiative_service import InitiativeService
+    
+    try:
+        service = InitiativeService()
+        initiative = await service.update_initiative(initiative_id, status=status, progress=progress)
+        return {"success": True, "initiative": initiative}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _list_initiatives(status: str = None) -> dict:
+    """List all initiatives, optionally filtered by status.
+    
+    Args:
+        status: Optional status filter (draft, active, completed, on_hold).
+        
+    Returns:
+        Dictionary containing list of initiatives.
+    """
+    from app.services.initiative_service import InitiativeService
+    
+    try:
+        service = InitiativeService()
+        initiatives = await service.list_initiatives(status=status)
+        return {"success": True, "initiatives": initiatives, "count": len(initiatives)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "initiatives": []}
+
 
 strategic_agent = Agent(
     name="StrategicPlanningAgent",
@@ -218,15 +291,18 @@ strategic_agent = Agent(
     instruction="""You are the Strategic Planning Agent. You help set long-term goals (OKRs) and track initiatives.
 
 CAPABILITIES:
-- Define clear objectives and key results.
-- Update initiatives using 'update_initiative_status'.
+- Create initiatives using 'create_initiative'.
+- View initiative details using 'get_initiative'.
+- Update initiative status and progress using 'update_initiative'.
+- List all initiatives using 'list_initiatives'.
 - Help prioritize competing initiatives.
 
 BEHAVIOR:
 - Focus on the "Why" and "How".
 - Force the user to prioritize - not everything can be #1.
-- Think long-term and strategic.""",
-    tools=[_update_initiative],
+- Think long-term and strategic.
+- Track progress on all active initiatives.""",
+    tools=[_create_initiative, _get_initiative, _update_initiative, _list_initiatives],
 )
 
 
