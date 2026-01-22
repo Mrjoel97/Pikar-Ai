@@ -4,7 +4,7 @@
 Implement real database-backed services for the remaining 6 specialized agents that currently use mock tools or only RAG search.
 
 ## Phase 1: Core Business Services
-- [~] Scaffold `initiative_service` feature (TDD)
+- [x] Scaffold `initiative_service` feature (TDD) [64745ee]
 - [ ] Implement `InitiativeService` class (Supabase CRUD for initiatives, OKRs)
 - [ ] Update `StrategicPlanningAgent` to use `InitiativeService`
 - [ ] Scaffold `campaign_service` feature (TDD)
