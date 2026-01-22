@@ -17,7 +17,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Update `HRRecruitmentAgent` to use `RecruitmentService` [bff9aae]
 - [x] Scaffold `compliance_service` feature (TDD) [0c2ae80]
 - [x] Implement `ComplianceService` class (audits, risk assessments) [a81c71c]
-- [ ] Update `ComplianceRiskAgent` to use `ComplianceService`
+- [~] Update `ComplianceRiskAgent` to use `ComplianceService`
 
 ## Phase 3: Customer & Analytics Services
 - [ ] Scaffold `support_ticket_service` feature (TDD)
