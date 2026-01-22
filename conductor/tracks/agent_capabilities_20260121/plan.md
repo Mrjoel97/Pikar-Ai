@@ -12,7 +12,7 @@ Replace mock tools with real, database-backed services (`app/services/`) to enab
 ## Phase 2: Task & CRM Service (Sales/Operations Agents)
 - [x] Scaffold `task_service` feature (TDD) [a49166e]
 - [x] Implement `TaskService` (CRUD for `ai_jobs` or new `tasks` table) [c310eaf]
-- [ ] Update `SalesAgent` and `OperationsAgent` to use `TaskService`
+- [~] Update `SalesAgent` and `OperationsAgent` to use `TaskService`
 
 ## Phase 3: Content Service (ContentCreationAgent)
 - [ ] Scaffold `content_service` feature (TDD)

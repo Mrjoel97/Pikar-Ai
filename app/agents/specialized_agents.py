@@ -200,6 +200,65 @@ async def _create_task(description: str) -> dict:
             "success": False
         }
 
+
+async def _get_task(task_id: str) -> dict:
+    """Retrieve a task by its ID from TaskService.
+    
+    Args:
+        task_id: The unique identifier of the task.
+        
+    Returns:
+        Dictionary containing the task details.
+    """
+    from app.services.task_service import TaskService
+    
+    try:
+        service = TaskService()
+        task = await service.get_task(task_id)
+        return {"success": True, "task": task}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _update_task(task_id: str, status: str) -> dict:
+    """Update a task's status via TaskService.
+    
+    Args:
+        task_id: The unique identifier of the task.
+        status: New status (pending, running, completed, failed).
+        
+    Returns:
+        Dictionary confirming the update.
+    """
+    from app.services.task_service import TaskService
+    
+    try:
+        service = TaskService()
+        task = await service.update_task(task_id, status=status)
+        return {"success": True, "task": task}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _list_tasks(status: str = None) -> dict:
+    """List tasks, optionally filtered by status.
+    
+    Args:
+        status: Optional status filter (pending, running, completed, failed).
+        
+    Returns:
+        Dictionary containing list of tasks.
+    """
+    from app.services.task_service import TaskService
+    
+    try:
+        service = TaskService()
+        tasks = await service.list_tasks(status=status)
+        return {"success": True, "tasks": tasks, "count": len(tasks)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "tasks": []}
+
+
 sales_agent = Agent(
     name="SalesIntelligenceAgent",
     model=get_model(),
@@ -209,13 +268,14 @@ sales_agent = Agent(
 CAPABILITIES:
 - Score deals and analyze leads.
 - Create tasks for follow-ups using 'create_task'.
+- View and update task status using 'get_task', 'update_task', 'list_tasks'.
 - Draft outreach emails and sales scripts.
 
 BEHAVIOR:
 - Be aggressive but empathetic.
 - Focus on closing deals and increasing Lifetime Value (LTV).
 - Always suggest next steps for each lead.""",
-    tools=[_create_task],
+    tools=[_create_task, _get_task, _update_task, _list_tasks],
 )
 
 
@@ -255,13 +315,13 @@ operations_agent = Agent(
 CAPABILITIES:
 - Analyze and optimize business processes.
 - Identify bottlenecks in workflows.
-- Create tasks for operational maintenance using 'create_task'.
+- Create and manage operational tasks using 'create_task', 'get_task', 'update_task', 'list_tasks'.
 
 BEHAVIOR:
 - Be systematic and thorough.
 - Always look for opportunities to improve efficiency.
 - Document processes clearly.""",
-    tools=[_create_task],
+    tools=[_create_task, _get_task, _update_task, _list_tasks],
 )
 
 
