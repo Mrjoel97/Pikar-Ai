@@ -24,7 +24,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Implement `SupportTicketService` class (ticket CRUD) [bc9af83]
 - [x] Update `CustomerSupportAgent` to use `SupportTicketService` [6ccecf7]
 - [x] Scaffold `analytics_service` feature (TDD) [3f974a3]
-- [ ] Implement `AnalyticsService` class (events, reports)
+- [~] Implement `AnalyticsService` class (events, reports)
 - [ ] Update `DataAnalysisAgent` to use `AnalyticsService`
 
 
