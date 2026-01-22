@@ -15,6 +15,6 @@ Replace mock tools with real, database-backed services (`app/services/`) to enab
 - [x] Update `SalesAgent` and `OperationsAgent` to use `TaskService` [d13aaf5]
 
 ## Phase 3: Content Service (ContentCreationAgent)
-- [ ] Scaffold `content_service` feature (TDD)
+- [~] Scaffold `content_service` feature (TDD)
 - [ ] Enhance `KnowledgeVault` for content generation/storage
 - [ ] Update `ContentCreationAgent`
