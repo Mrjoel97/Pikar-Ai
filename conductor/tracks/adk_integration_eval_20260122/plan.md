@@ -9,7 +9,7 @@ Formalize the `adk_a2a_app_testing.ipynb` and `evaluating_adk_agent.ipynb` noteb
 - [x] Verify A2A protocol works with local agent [8717f43]
 
 ## Phase 2: Agent Evaluation "IQ" Pipeline
-- [ ] Scaffold `tests/eval_datasets` and `scripts/evaluation`
+- [~] Scaffold `tests/eval_datasets` and `scripts/evaluation`
 - [ ] Create `evaluate_agent.py` script (based on `evaluating_adk_agent.ipynb`)
 - [ ] Create sample evaluation dataset (`recruitment_eval.json`)
 - [ ] Run baseline evaluation on `HRRecruitmentAgent`

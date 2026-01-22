@@ -1,8 +1,3 @@
-"""Integration tests for A2A Protocol compliance.
-
-This module verifies that the agent correctly implements the Agent2Agent (A2A) protocol
-by spinning up the FastAPI app in a test client and performing a full message exchange.
-"""
 
 import sys
 import os
@@ -10,13 +5,18 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-# Mock Google Auth and Cloud Logging before importing app
-with patch('google.auth.default', return_value=(MagicMock(), "test-project")):
-    with patch('google.cloud.logging.Client'):
-        from app.fast_api_app import app
-        from a2a.types import Message, Role, Part, TextPart, MessageSendParams, SendStreamingMessageRequest
-        import uuid
-        import json
+# Mock environmental dependencies before importing the app
+# We need to mock setup_telemetry to avoid real GCP auth/OTEL setup
+with patch('app.app_utils.telemetry.setup_telemetry') as mock_setup:
+    mock_setup.return_value = None
+    
+    # Mock Google Auth and Cloud Logging
+    with patch('google.auth.default', return_value=(MagicMock(), "test-project")):
+        with patch('google.cloud.logging.Client'):
+            from app.fast_api_app import app
+            from a2a.types import Message, Role, Part, TextPart, MessageSendParams, SendStreamingMessageRequest
+            import uuid
+            import json
 
 client = TestClient(app)
 
