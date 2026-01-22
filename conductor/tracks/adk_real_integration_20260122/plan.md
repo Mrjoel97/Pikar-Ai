@@ -4,7 +4,7 @@
 Enable "real" integration testing by removing mocks for Google Auth and Telemetry, allowing the agent to connect to actual backend services (Vertex AI, Supabase).
 
 ## Tasks
-- [~] Update `tests/integration/test_a2a_protocol.py` to remove `patch` decorators and use real `TestClient` initialization.
+- [x] Update `tests/integration/test_a2a_protocol.py` to remove `patch` decorators and use real `TestClient` initialization. [8a8352a]
 - [ ] Verify `setup_telemetry` can run (handle optional `LOGS_BUCKET_NAME` gracefully).
 - [ ] Verify `google.auth.default()` works or provide clear error/setup instructions if it fails.
 - [ ] Run `test_a2a_protocol.py` with real dependencies.
