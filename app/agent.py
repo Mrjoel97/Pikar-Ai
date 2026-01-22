@@ -26,7 +26,7 @@ from google.genai import types
 
 # Production App configuration imports
 from google.adk.agents.context_cache_config import ContextCacheConfig
-from google.adk.apps.events_compaction_config import EventsCompactionConfig
+from google.adk.apps.app import EventsCompactionConfig
 
 import os
 import uuid

@@ -23,7 +23,7 @@ def test_update_initiative_status_returns_success():
 
 def test_create_task_returns_task_id():
     """Tests that create_task returns a dictionary with a 'task_id' key."""
-    result = create_task("test task")
+    result = create_task("test task", "unassigned", "medium")
     assert isinstance(result, dict)
     assert "task_id" in result
     assert isinstance(result["task_id"], str)

@@ -98,21 +98,6 @@ def _search_knowledge(query: str) -> dict:
     except Exception:
         return {"results": []}
 
-content_agent = Agent(
-    name="ContentCreationAgent",
-    model=get_model(),
-    description="CMO / Creative Director - Creates marketing copy, blog posts, and social media content",
-    instruction="""You are the Content Creation Agent. You generate high-quality marketing copy, blog posts, and social media content.
-
-CAPABILITIES:
-- Draft content based on brand voice from 'search_business_knowledge'.
-- Create content calendars.
-- Write engaging copy for various platforms.
-
-BEHAVIOR:
-- Match the user's brand voice (Corporate, Witty, Academic, etc.).
-- Optimize for engagement and SEO.
-- Be creative but on-brand.""",
 
 async def _save_content(title: str, content: str) -> dict:
     """Save generated content to the Knowledge Vault via ContentService.

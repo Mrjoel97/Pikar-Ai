@@ -1,33 +1,14 @@
-
-import sys
-from unittest.mock import MagicMock, patch
-
-# Mock google.adk components
-sys.modules["google"] = MagicMock()
-sys.modules["google.genai"] = MagicMock()
-sys.modules["google.genai.types"] = MagicMock()
-sys.modules["google.adk"] = MagicMock()
-sys.modules["google.adk.agents"] = MagicMock()
-sys.modules["google.adk.apps"] = MagicMock()
-sys.modules["google.adk.models"] = MagicMock()
-sys.modules["google.adk.agents.context_cache_config"] = MagicMock()
-sys.modules["google.adk.apps.events_compaction_config"] = MagicMock()
-# Mock opentelemetry to avoid version issues
-sys.modules["opentelemetry"] = MagicMock()
-sys.modules["opentelemetry.instrumentation"] = MagicMock()
-sys.modules["opentelemetry.instrumentation.google_genai"] = MagicMock()
-
-# Mock internal dependencies that trigger import errors
-sys.modules["app.rag.embedding_service"] = MagicMock()
-
+"""Unit tests for ContentService."""
 import pytest
+from unittest.mock import patch, MagicMock
 from app.services.content_service import ContentService
+
 
 def test_content_service_initialization():
     obj = ContentService()
     assert obj is not None
 
-@patch("app.rag.knowledge_vault.ingest_document_content")
+@patch("app.services.content_service.ingest_document_content")
 @pytest.mark.asyncio
 async def test_save_content(mock_ingest):
     # Setup
