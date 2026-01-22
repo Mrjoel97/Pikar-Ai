@@ -69,6 +69,7 @@ def start_task():
     plan_path = find_plan_file()
     if not plan_path: return
 
+    print(f"DEBUG: Loading plan from {plan_path}")
     with open(plan_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
@@ -101,6 +102,18 @@ def start_task():
         f.writelines(lines)
     
     print(f"Successfully started task:\n{updated_line.strip()}")
+    
+    # Verify Skills Registry
+    try:
+        sys.path.append(os.getcwd())
+        from app.skills import skills_registry
+        skill_count = len(skills_registry.list_all())
+        print(f"\n[Conductor] Skills Registry Verification: Passed")
+        print(f"[Conductor] Active Skills Loaded: {skill_count}")
+        print(f"[Conductor] System enhanced with {skill_count} domain capabilities.")
+    except Exception as e:
+        print(f"\n[Conductor] Skills Registry Verification: FAILED")
+        print(f"Error loading skills: {str(e)}")
 
 def complete_task(summary: str, why: str):
     """Commits work, adds git note, and updates plan with completion SHA."""

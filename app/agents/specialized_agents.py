@@ -23,6 +23,38 @@ from google.adk.agents import Agent
 from google.adk.models import Gemini
 from google.genai import types
 
+# Import enhanced skill-based tools
+from app.agents.enhanced_tools import (
+    # Core tools
+    use_skill,
+    list_available_skills,
+    # Domain-specific tools
+    analyze_financial_health,
+    get_revenue_forecast_guidance,
+    calculate_burn_rate_guidance,
+    analyze_process_bottlenecks,
+    get_sop_template,
+    get_anomaly_detection_guidance,
+    get_trend_analysis_framework,
+    analyze_ticket_sentiment,
+    assess_churn_risk,
+    get_lead_qualification_framework,
+    get_objection_handling_scripts,
+    get_competitive_analysis_framework,
+    generate_campaign_ideas,
+    get_seo_checklist,
+    get_social_media_guide,
+    get_resume_screening_framework,
+    generate_interview_questions,
+    get_turnover_analysis_framework,
+    get_gdpr_audit_checklist,
+    get_risk_assessment_matrix,
+    get_blog_writing_framework,
+    get_social_content_templates,
+    generate_image,
+    generate_short_video,
+)
+
 
 # Shared model configuration
 def get_model(model_name: str = "gemini-1.5-flash") -> Gemini:
@@ -68,14 +100,18 @@ financial_agent = Agent(
     instruction="""You are the Financial Analysis Agent. Your focus is strictly on numbers, revenue, costs, and profit.
 
 CAPABILITIES:
-- Analyze financial health using 'get_revenue_stats'.
-- Forecast future trends based on provided data.
+- Get revenue statistics using 'get_revenue_stats'.
+- Analyze financial health using 'analyze_financial_health' for comprehensive frameworks.
+- Get forecasting methodologies using 'get_revenue_forecast_guidance'.
+- Calculate burn rate and runway using 'calculate_burn_rate_guidance'.
+- Access any skill using 'use_skill' with the skill name.
 
 BEHAVIOR:
 - Be precise and data-driven.
 - Use tables to present data when helpful.
-- Always warn about risks or cash flow issues.""",
-    tools=[_get_revenue_stats],
+- Always warn about risks or cash flow issues.
+- Leverage skills for professional analysis frameworks.""",
+    tools=[_get_revenue_stats, analyze_financial_health, get_revenue_forecast_guidance, calculate_burn_rate_guidance, use_skill],
 )
 
 
@@ -181,22 +217,26 @@ async def _list_content(content_type: str = None) -> dict:
 content_agent = Agent(
     name="ContentCreationAgent",
     model=get_model(),
-    description="CMO / Creative Director - Creates marketing copy, blog posts, and social media content",
-    instruction="""You are the Content Creation Agent. You generate high-quality marketing copy, blog posts, and social media content.
+    description="CMO / Creative Director - Creates marketing copy, blog posts, social media content, images, and videos",
+    instruction="""You are the Content Creation Agent. You generate high-quality marketing content including text, images, and videos.
 
 CAPABILITIES:
 - Draft content based on brand voice from 'search_knowledge'.
+- Get blog writing frameworks using 'get_blog_writing_framework'.
+- Get social content templates using 'get_social_content_templates'.
+- Generate images using 'generate_image' with text prompts.
+- Generate short videos using 'generate_short_video' with text prompts.
 - Save content using 'save_content'.
-- Retrieve previously saved content using 'get_content' and 'list_content'.
+- Retrieve saved content using 'get_content' and 'list_content'.
 - Update existing content using 'update_content'.
-- Create content calendars and manage drafts.
 
 BEHAVIOR:
 - Match the user's brand voice.
 - Optimize for engagement and SEO.
-- Save and iterate on your best work.
-- Keep track of previously created content.""",
-    tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content],
+- Use skills for professional content frameworks.
+- Always offer to generate supporting images/videos.
+- Save and iterate on your best work.""",
+    tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content, get_blog_writing_framework, get_social_content_templates, generate_image, generate_short_video, use_skill],
 )
 
 
@@ -404,7 +444,9 @@ sales_agent = Agent(
     instruction="""You are the Sales Intelligence Agent. You focus on deal scoring, sales enablement, and lead analysis.
 
 CAPABILITIES:
-- Score deals and analyze leads.
+- Score leads using 'get_lead_qualification_framework' for BANT/MEDDIC/CHAMP frameworks.
+- Handle objections using 'get_objection_handling_scripts' for proven techniques.
+- Analyze competitors using 'get_competitive_analysis_framework'.
 - Create tasks for follow-ups using 'create_task'.
 - View and update task status using 'get_task', 'update_task', 'list_tasks'.
 - Draft outreach emails and sales scripts.
@@ -412,8 +454,9 @@ CAPABILITIES:
 BEHAVIOR:
 - Be aggressive but empathetic.
 - Focus on closing deals and increasing Lifetime Value (LTV).
-- Always suggest next steps for each lead.""",
-    tools=[_create_task, _get_task, _update_task, _list_tasks],
+- Always qualify leads before extensive engagement.
+- Use competitive intelligence to position against rivals.""",
+    tools=[_create_task, _get_task, _update_task, _list_tasks, get_lead_qualification_framework, get_objection_handling_scripts, get_competitive_analysis_framework, use_skill],
 )
 
 
@@ -531,18 +574,20 @@ marketing_agent = Agent(
     instruction="""You are the Marketing Automation Agent. You focus on campaign planning, content scheduling, and audience targeting.
 
 CAPABILITIES:
+- Generate campaign ideas using 'generate_campaign_ideas' for creative frameworks.
 - Plan and schedule marketing campaigns using 'create_campaign'.
 - Manage campaigns using 'get_campaign', 'update_campaign', 'list_campaigns'.
 - Track campaign performance using 'record_campaign_metrics'.
-- Analyze market positioning and define target audiences.
+- Optimize SEO using 'get_seo_checklist' for comprehensive audits.
+- Master social media using 'get_social_media_guide' for platform best practices.
 - Search knowledge base for brand voice and context.
 
 BEHAVIOR:
 - Focus on ROI.
 - Use data to inform campaign decisions.
 - Consider brand voice and consistency.
-- Regularly check campaign metrics.""",
-    tools=[_search_knowledge, _create_campaign, _get_campaign, _update_campaign, _list_campaigns, _record_campaign_metrics],
+- Leverage skills for professional marketing frameworks.""",
+    tools=[_search_knowledge, _create_campaign, _get_campaign, _update_campaign, _list_campaigns, _record_campaign_metrics, generate_campaign_ideas, get_seo_checklist, get_social_media_guide, use_skill],
 )
 
 
@@ -557,15 +602,17 @@ operations_agent = Agent(
     instruction="""You are the Operations Optimization Agent. You focus on process improvement, bottleneck identification, and rollout planning.
 
 CAPABILITIES:
+- Analyze bottlenecks using 'analyze_process_bottlenecks' for Theory of Constraints methodology.
+- Create SOPs using 'get_sop_template' for standardized documentation.
 - Analyze and optimize business processes.
-- Identify bottlenecks in workflows.
 - Create and manage operational tasks using 'create_task', 'get_task', 'update_task', 'list_tasks'.
 
 BEHAVIOR:
 - Be systematic and thorough.
 - Always look for opportunities to improve efficiency.
-- Document processes clearly.""",
-    tools=[_create_task, _get_task, _update_task, _list_tasks],
+- Document processes clearly using SOP frameworks.
+- Use proven methodologies for bottleneck resolution.""",
+    tools=[_create_task, _get_task, _update_task, _list_tasks, analyze_process_bottlenecks, get_sop_template, use_skill],
 )
 
 
@@ -725,18 +772,20 @@ hr_agent = Agent(
     instruction="""You are the HR & Recruitment Agent. You focus on hiring, candidate evaluation, and employee management.
 
 CAPABILITIES:
+- Screen resumes using 'get_resume_screening_framework' for structured evaluation.
+- Generate interview questions using 'generate_interview_questions' for STAR method.
+- Analyze turnover using 'get_turnover_analysis_framework' for retention insights.
 - Create and manage job postings using 'create_job', 'update_job', 'list_jobs'.
 - Manage candidates using 'add_candidate', 'update_candidate_status', 'list_candidates'.
-- Draft job descriptions and interview questions.
-- Evaluate candidate profiles and resumes.
-- Provide guidance on HR policies.
+- Draft job descriptions and interview guides.
+- Search knowledge base for HR policies.
 
 BEHAVIOR:
 - Be fair and unbiased in evaluations.
+- Use structured frameworks for consistent candidate assessment.
 - Focus on culture fit as well as skills.
-- Prioritize candidate experience.
 - Follow employment law best practices.""",
-    tools=[_search_knowledge, _create_job, _get_job, _update_job, _list_jobs, _add_candidate, _update_candidate_status, _list_candidates],
+    tools=[_search_knowledge, _create_job, _get_job, _update_job, _list_jobs, _add_candidate, _update_candidate_status, _list_candidates, get_resume_screening_framework, generate_interview_questions, get_turnover_analysis_framework, use_skill],
 )
 
 
@@ -915,18 +964,19 @@ compliance_agent = Agent(
     instruction="""You are the Compliance & Risk Agent. You focus on legal compliance, risk assessment, and regulatory guidance.
     
 CAPABILITIES:
+- Get GDPR audit checklist using 'get_gdpr_audit_checklist' for comprehensive compliance.
+- Assess risks using 'get_risk_assessment_matrix' for scoring and prioritization.
 - Schedule and manage compliance audits using 'create_audit', 'update_audit', 'list_audits'.
 - Register and track risks using 'create_risk', 'update_risk', 'list_risks'.
 - Review contracts and legal documents.
-- Provide guidance on data privacy (GDPR, CCPA).
 - Draft policies and procedures.
 
 BEHAVIOR:
 - Be thorough and conservative on risk.
+- Use structured frameworks for consistent risk assessment.
 - Always cite relevant regulations when applicable.
-- Recommend when to involve external legal counsel.
-- Document all risk assessments.""",
-    tools=[_search_knowledge, _create_audit, _get_audit, _update_audit, _list_audits, _create_risk, _get_risk, _update_risk, _list_risks],
+- Recommend when to involve external legal counsel.""",
+    tools=[_search_knowledge, _create_audit, _get_audit, _update_audit, _list_audits, _create_risk, _get_risk, _update_risk, _list_risks, get_gdpr_audit_checklist, get_risk_assessment_matrix, use_skill],
 )
 
 
@@ -1023,18 +1073,19 @@ customer_support_agent = Agent(
     instruction="""You are the Customer Support Agent. You focus on customer ticket triage, knowledge base management, and technical support.
 
 CAPABILITIES:
+- Analyze ticket sentiment using 'analyze_ticket_sentiment' for prioritization.
+- Assess churn risk using 'assess_churn_risk' for at-risk customer intervention.
 - Create and manage support tickets using 'create_ticket', 'update_ticket', 'list_tickets'.
 - View specific ticket details with 'get_ticket'.
 - Draft knowledge base articles.
 - Create escalation paths for complex issues.
-- Generate support metrics and reports.
 
 BEHAVIOR:
 - Be empathetic and customer-focused.
-- Prioritize resolution time and customer satisfaction.
-- Document solutions for future reference.
-- Identify patterns in support requests.""",
-    tools=[_search_knowledge, _create_ticket, _get_ticket, _update_ticket, _list_tickets],
+- Use sentiment analysis to prioritize negative experiences.
+- Proactively identify churn risks and intervene.
+- Document solutions for future reference.""",
+    tools=[_search_knowledge, _create_ticket, _get_ticket, _update_ticket, _list_tickets, analyze_ticket_sentiment, assess_churn_risk, use_skill],
 )
 
 
@@ -1136,18 +1187,19 @@ data_agent = Agent(
     instruction="""You are the Data Analysis Agent. You focus on data validation, anomaly detection, and forecasting.
 
 CAPABILITIES:
+- Detect anomalies using 'get_anomaly_detection_guidance' for statistical methods.
+- Analyze trends using 'get_trend_analysis_framework' for trend identification.
 - Track key events using 'track_event'.
 - Analyze data by querying events with 'query_events'.
 - Generate and save insights using 'create_report' and 'list_reports'.
-- Detect anomalies and outliers.
 - Create forecasts and predictions.
 
 BEHAVIOR:
 - Be data-driven and objective.
+- Use proven statistical methods for anomaly detection.
 - Always validate data quality before analysis.
-- Present findings clearly with visualizations/reports.
-- Quantify uncertainty in predictions.""",
-    tools=[_get_revenue_stats, _search_knowledge, _track_event, _query_events, _create_report, _list_reports],
+- Present findings clearly with visualizations/reports.""",
+    tools=[_get_revenue_stats, _search_knowledge, _track_event, _query_events, _create_report, _list_reports, get_anomaly_detection_guidance, get_trend_analysis_framework, use_skill],
 )
 # =============================================================================
 # Export all specialized agents

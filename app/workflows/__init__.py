@@ -22,6 +22,9 @@ This package contains workflow agents using ADK patterns:
 All workflows are composed of specialized agents from app.agents.
 """
 
+# Workflow registry for catalog alignment
+from app.workflows.registry import workflow_registry, get_workflow, list_workflows
+
 # Category imports will be added as workflows are implemented
 from app.workflows.initiative import *
 from app.workflows.product import *
@@ -34,3 +37,5 @@ from app.workflows.hr import *
 from app.workflows.documentation import *
 from app.workflows.knowledge import *
 from app.workflows.dynamic import *
+
+__all__ = ["workflow_registry", "get_workflow", "list_workflows"]
