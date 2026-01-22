@@ -13,7 +13,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 
 ## Phase 2: HR & Compliance Services
 - [x] Scaffold `recruitment_service` feature (TDD) [0f0d0bb]
-- [~] Implement `RecruitmentService` class (job postings, candidates)
+- [x] Implement `RecruitmentService` class (job postings, candidates) [edfda88]
 - [ ] Update `HRRecruitmentAgent` to use `RecruitmentService`
 - [ ] Scaffold `compliance_service` feature (TDD)
 - [ ] Implement `ComplianceService` class (audits, risk assessments)
