@@ -1,7 +1,7 @@
 {
-    "id": "agent_capabilities_phase2_20260122",
-    "type": "feature",
-    "status": "active",
-    "created": "2026-01-22",
-    "description": "Implement real backend services for remaining 6 specialized agents (Strategic, Marketing, HR, Compliance, Support, Data)"
+    "name": "agent_capabilities_phase2",
+    "description": "Implementation of real database-backed services and updating specialized agents.",
+    "status": "complete",
+    "created_at": "2026-01-22",
+    "owner": "antigravity"
 }
