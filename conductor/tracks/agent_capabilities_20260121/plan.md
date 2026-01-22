@@ -16,5 +16,5 @@ Replace mock tools with real, database-backed services (`app/services/`) to enab
 
 ## Phase 3: Content Service (ContentCreationAgent)
 - [x] Scaffold `content_service` feature (TDD) [ea476a8]
-- [ ] Enhance `KnowledgeVault` for content generation/storage
+- [~] Enhance `KnowledgeVault` for content generation/storage
 - [ ] Update `ContentCreationAgent`

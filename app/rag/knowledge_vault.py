@@ -180,3 +180,57 @@ def search_knowledge(
             "query": query,
             "error": str(e)
         }
+
+
+def get_content_by_id(content_id: str) -> dict | None:
+    """Retrieve a specific content item by its ID.
+    
+    Args:
+        content_id: The unique ID of the content item.
+        
+    Returns:
+        The content record or None if not found.
+    """
+    try:
+        client = get_supabase_client()
+        response = (
+            client.table("agent_knowledge")
+            .select("*")
+            .eq("id", content_id)
+            .single()
+            .execute()
+        )
+        return response.data
+    except Exception:
+        return None
+
+
+def list_agent_content(
+    agent_id: str | None = None,
+    content_type: str | None = None,
+    limit: int = 50
+) -> list:
+    """List content items from the Knowledge Vault.
+    
+    Args:
+        agent_id: Optional filter by agent ID.
+        content_type: Optional filter by content type (e.g., 'generated_content').
+        limit: Maximum number of items to return.
+        
+    Returns:
+        List of content records.
+    """
+    try:
+        client = get_supabase_client()
+        query = client.table("agent_knowledge").select("*")
+        
+        if agent_id:
+            query = query.eq("agent_id", agent_id)
+        if content_type:
+            query = query.eq("document_type", content_type)
+            
+        response = query.order("created_at", desc=True).limit(limit).execute()
+        return response.data or []
+    except Exception:
+        return []
+
