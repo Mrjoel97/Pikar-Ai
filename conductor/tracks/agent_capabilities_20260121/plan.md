@@ -18,3 +18,7 @@ Replace mock tools with real, database-backed services (`app/services/`) to enab
 - [x] Scaffold `content_service` feature (TDD) [ea476a8]
 - [x] Enhance `KnowledgeVault` for content generation/storage [689cce7]
 - [x] Update `ContentCreationAgent` [c6de4a9]
+
+
+## Phase Checkpoint [checkpoint: d04d444]
+**Summary**: agent_capabilities track complete: Phase 1 (Financial Service), Phase 2 (TaskService CRUD for SalesAgent/OperationsAgent), Phase 3 (ContentService CRUD for ContentCreationAgent, KnowledgeVault enhancement)
