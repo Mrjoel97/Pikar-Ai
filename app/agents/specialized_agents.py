@@ -421,6 +421,109 @@ BEHAVIOR:
 # Marketing Automation Agent
 # =============================================================================
 
+async def _create_campaign(name: str, campaign_type: str, target_audience: str) -> dict:
+    """Create a new marketing campaign.
+    
+    Args:
+        name: Campaign name.
+        campaign_type: Type (email, social, content, paid_ads).
+        target_audience: Target audience description.
+        
+    Returns:
+        Dictionary containing the created campaign.
+    """
+    from app.services.campaign_service import CampaignService
+    
+    try:
+        service = CampaignService()
+        campaign = await service.create_campaign(name, campaign_type, target_audience)
+        return {"success": True, "campaign": campaign}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _get_campaign(campaign_id: str) -> dict:
+    """Retrieve a campaign by ID.
+    
+    Args:
+        campaign_id: The unique campaign ID.
+        
+    Returns:
+        Dictionary containing the campaign details.
+    """
+    from app.services.campaign_service import CampaignService
+    
+    try:
+        service = CampaignService()
+        campaign = await service.get_campaign(campaign_id)
+        return {"success": True, "campaign": campaign}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _update_campaign(campaign_id: str, status: str = None, name: str = None) -> dict:
+    """Update a campaign's status or name.
+    
+    Args:
+        campaign_id: The unique campaign ID.
+        status: New status (draft, active, paused, completed).
+        name: New campaign name.
+        
+    Returns:
+        Dictionary confirming the update.
+    """
+    from app.services.campaign_service import CampaignService
+    
+    try:
+        service = CampaignService()
+        campaign = await service.update_campaign(campaign_id, status=status, name=name)
+        return {"success": True, "campaign": campaign}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _list_campaigns(status: str = None, campaign_type: str = None) -> dict:
+    """List campaigns with optional filters.
+    
+    Args:
+        status: Filter by campaign status.
+        campaign_type: Filter by campaign type.
+        
+    Returns:
+        Dictionary containing list of campaigns.
+    """
+    from app.services.campaign_service import CampaignService
+    
+    try:
+        service = CampaignService()
+        campaigns = await service.list_campaigns(status=status, campaign_type=campaign_type)
+        return {"success": True, "campaigns": campaigns, "count": len(campaigns)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "campaigns": []}
+
+
+async def _record_campaign_metrics(campaign_id: str, impressions: int = 0, clicks: int = 0, conversions: int = 0) -> dict:
+    """Record performance metrics for a campaign.
+    
+    Args:
+        campaign_id: The unique campaign ID.
+        impressions: Number of impressions.
+        clicks: Number of clicks.
+        conversions: Number of conversions.
+        
+    Returns:
+        Dictionary with updated campaign metrics.
+    """
+    from app.services.campaign_service import CampaignService
+    
+    try:
+        service = CampaignService()
+        result = await service.record_metrics(campaign_id, impressions, clicks, conversions)
+        return {"success": True, "campaign": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 marketing_agent = Agent(
     name="MarketingAutomationAgent",
     model=get_model(),
@@ -428,15 +531,18 @@ marketing_agent = Agent(
     instruction="""You are the Marketing Automation Agent. You focus on campaign planning, content scheduling, and audience targeting.
 
 CAPABILITIES:
-- Analyze market positioning.
-- Plan and schedule marketing campaigns.
-- Define target audience segments.
+- Plan and schedule marketing campaigns using 'create_campaign'.
+- Manage campaigns using 'get_campaign', 'update_campaign', 'list_campaigns'.
+- Track campaign performance using 'record_campaign_metrics'.
+- Analyze market positioning and define target audiences.
+- Search knowledge base for brand voice and context.
 
 BEHAVIOR:
 - Focus on ROI.
 - Use data to inform campaign decisions.
-- Consider brand voice and consistency.""",
-    tools=[_search_knowledge],
+- Consider brand voice and consistency.
+- Regularly check campaign metrics.""",
+    tools=[_search_knowledge, _create_campaign, _get_campaign, _update_campaign, _list_campaigns, _record_campaign_metrics],
 )
 
 

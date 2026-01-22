@@ -9,7 +9,7 @@ Implement real database-backed services for the remaining 6 specialized agents t
 - [x] Update `StrategicPlanningAgent` to use `InitiativeService` [d2801e4]
 - [x] Scaffold `campaign_service` feature (TDD) [6b9e3b4]
 - [x] Implement `CampaignService` class (Supabase CRUD for campaigns, metrics) [a110919]
-- [ ] Update `MarketingAutomationAgent` to use `CampaignService`
+- [~] Update `MarketingAutomationAgent` to use `CampaignService`
 
 ## Phase 2: HR & Compliance Services
 - [ ] Scaffold `recruitment_service` feature (TDD)
