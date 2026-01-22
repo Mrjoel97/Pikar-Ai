@@ -10,7 +10,7 @@ Formalize the `adk_a2a_app_testing.ipynb` and `evaluating_adk_agent.ipynb` noteb
 
 ## Phase 2: Agent Evaluation "IQ" Pipeline
 - [x] Scaffold `tests/eval_datasets` and `scripts/evaluation` [3f5cd8d]
-- [ ] Create `evaluate_agent.py` script (based on `evaluating_adk_agent.ipynb`)
+- [~] Create `evaluate_agent.py` script (based on `evaluating_adk_agent.ipynb`)
 - [ ] Create sample evaluation dataset (`recruitment_eval.json`)
 - [ ] Run baseline evaluation on `HRRecruitmentAgent`
 
