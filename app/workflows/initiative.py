@@ -23,20 +23,25 @@ This module implements 6 workflow agents for initiative lifecycle management:
 6. InitiativeScalePipeline - Growth optimization post-launch
 
 Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint. Each workflow gets its own
+agent instances that are independent from ExecutiveAgent's sub_agents.
 """
 
 from google.adk.agents import SequentialAgent, ParallelAgent, LoopAgent
 
+# Import factory functions instead of singleton instances
 from app.agents.specialized_agents import (
-    strategic_agent,
-    content_agent,
-    data_agent,
-    financial_agent,
-    operations_agent,
-    hr_agent,
-    marketing_agent,
-    sales_agent,
-    compliance_agent,
+    create_strategic_agent,
+    create_content_agent,
+    create_data_agent,
+    create_financial_agent,
+    create_operations_agent,
+    create_hr_agent,
+    create_marketing_agent,
+    create_sales_agent,
+    create_compliance_agent,
 )
 
 
@@ -44,109 +49,173 @@ from app.agents.specialized_agents import (
 # 1. InitiativeIdeationPipeline
 # =============================================================================
 
-InitiativeIdeationPipeline = SequentialAgent(
-    name="InitiativeIdeationPipeline",
-    description="Brainstorm and validate initiative ideas through strategic, content, and data analysis",
-    sub_agents=[strategic_agent, content_agent, data_agent],
-)
+def create_initiative_ideation_pipeline() -> SequentialAgent:
+    """Create InitiativeIdeationPipeline with fresh agent instances.
+
+    Returns:
+        A SequentialAgent for brainstorming and validating initiative ideas
+        through strategic, content, and data analysis.
+    """
+    return SequentialAgent(
+        name="InitiativeIdeationPipeline",
+        description="Brainstorm and validate initiative ideas through strategic, content, and data analysis",
+        sub_agents=[
+            create_strategic_agent(),
+            create_content_agent(),
+            create_data_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 2. InitiativeValidationPipeline
 # =============================================================================
 
-# Parallel analysis phase - Executive synthesizes results externally
-_validation_parallel = ParallelAgent(
-    name="ValidationParallelAnalysis",
-    description="Concurrent multi-perspective feasibility analysis",
-    sub_agents=[data_agent, financial_agent, strategic_agent],
-)
+def create_initiative_validation_pipeline() -> SequentialAgent:
+    """Create InitiativeValidationPipeline with fresh agent instances.
 
-InitiativeValidationPipeline = SequentialAgent(
-    name="InitiativeValidationPipeline",
-    description="Multi-perspective feasibility analysis with parallel data gathering",
-    sub_agents=[_validation_parallel],
-)
+    Returns:
+        A SequentialAgent containing parallel analysis for multi-perspective
+        feasibility analysis with data, financial, and strategic agents.
+    """
+    validation_parallel = ParallelAgent(
+        name="ValidationParallelAnalysis",
+        description="Concurrent multi-perspective feasibility analysis",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="InitiativeValidationPipeline",
+        description="Multi-perspective feasibility analysis with parallel data gathering",
+        sub_agents=[validation_parallel],
+    )
 
 
 # =============================================================================
 # 3. InitiativeBuildPipeline
 # =============================================================================
 
-InitiativeBuildPipeline = SequentialAgent(
-    name="InitiativeBuildPipeline",
-    description="Plan resources and execution timeline for an initiative",
-    sub_agents=[strategic_agent, operations_agent, hr_agent],
-)
+def create_initiative_build_pipeline() -> SequentialAgent:
+    """Create InitiativeBuildPipeline with fresh agent instances.
+
+    Returns:
+        A SequentialAgent for planning resources and execution timeline
+        through strategic, operations, and HR analysis.
+    """
+    return SequentialAgent(
+        name="InitiativeBuildPipeline",
+        description="Plan resources and execution timeline for an initiative",
+        sub_agents=[
+            create_strategic_agent(),
+            create_operations_agent(),
+            create_hr_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 4. InitiativeTestPipeline
 # =============================================================================
 
-# Quality check loop - iterates until compliance and quality pass
-_test_sequential = SequentialAgent(
-    name="TestQualityCheck",
-    description="Single iteration of quality and compliance verification",
-    sub_agents=[operations_agent, data_agent, compliance_agent],
-)
+def create_initiative_test_pipeline() -> LoopAgent:
+    """Create InitiativeTestPipeline with fresh agent instances.
 
-InitiativeTestPipeline = LoopAgent(
-    name="InitiativeTestPipeline",
-    description="Iterative quality and compliance check until all criteria pass",
-    sub_agents=[_test_sequential],
-    max_iterations=5,
-)
+    Returns:
+        A LoopAgent for iterative quality and compliance checking
+        until all criteria pass (max 5 iterations).
+    """
+    test_sequential = SequentialAgent(
+        name="TestQualityCheck",
+        description="Single iteration of quality and compliance verification",
+        sub_agents=[
+            create_operations_agent(),
+            create_data_agent(),
+            create_compliance_agent(),
+        ],
+    )
+    return LoopAgent(
+        name="InitiativeTestPipeline",
+        description="Iterative quality and compliance check until all criteria pass",
+        sub_agents=[test_sequential],
+        max_iterations=5,
+    )
 
 
 # =============================================================================
 # 5. InitiativeLaunchPipeline
 # =============================================================================
 
-# Parallel launch preparation - Executive coordinates externally
-_launch_parallel = ParallelAgent(
-    name="LaunchParallelPrep",
-    description="Concurrent go-to-market preparation across marketing, sales, and content",
-    sub_agents=[marketing_agent, sales_agent, content_agent],
-)
+def create_initiative_launch_pipeline() -> SequentialAgent:
+    """Create InitiativeLaunchPipeline with fresh agent instances.
 
-InitiativeLaunchPipeline = SequentialAgent(
-    name="InitiativeLaunchPipeline",
-    description="Coordinated go-to-market execution with parallel preparation",
-    sub_agents=[_launch_parallel],
-)
+    Returns:
+        A SequentialAgent containing parallel go-to-market preparation
+        across marketing, sales, and content teams.
+    """
+    launch_parallel = ParallelAgent(
+        name="LaunchParallelPrep",
+        description="Concurrent go-to-market preparation across marketing, sales, and content",
+        sub_agents=[
+            create_marketing_agent(),
+            create_sales_agent(),
+            create_content_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="InitiativeLaunchPipeline",
+        description="Coordinated go-to-market execution with parallel preparation",
+        sub_agents=[launch_parallel],
+    )
 
 
 # =============================================================================
 # 6. InitiativeScalePipeline
 # =============================================================================
 
-InitiativeScalePipeline = SequentialAgent(
-    name="InitiativeScalePipeline",
-    description="Growth optimization post-launch through data-driven financial and strategic analysis",
-    sub_agents=[data_agent, financial_agent, strategic_agent, operations_agent],
-)
+def create_initiative_scale_pipeline() -> SequentialAgent:
+    """Create InitiativeScalePipeline with fresh agent instances.
+
+    Returns:
+        A SequentialAgent for growth optimization post-launch through
+        data-driven financial and strategic analysis.
+    """
+    return SequentialAgent(
+        name="InitiativeScalePipeline",
+        description="Growth optimization post-launch through data-driven financial and strategic analysis",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+            create_strategic_agent(),
+            create_operations_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-INITIATIVE_WORKFLOWS = [
-    InitiativeIdeationPipeline,
-    InitiativeValidationPipeline,
-    InitiativeBuildPipeline,
-    InitiativeTestPipeline,
-    InitiativeLaunchPipeline,
-    InitiativeScalePipeline,
-]
+# Factory function registry for lazy workflow instantiation
+INITIATIVE_WORKFLOW_FACTORIES = {
+    "InitiativeIdeationPipeline": create_initiative_ideation_pipeline,
+    "InitiativeValidationPipeline": create_initiative_validation_pipeline,
+    "InitiativeBuildPipeline": create_initiative_build_pipeline,
+    "InitiativeTestPipeline": create_initiative_test_pipeline,
+    "InitiativeLaunchPipeline": create_initiative_launch_pipeline,
+    "InitiativeScalePipeline": create_initiative_scale_pipeline,
+}
 
 __all__ = [
-    "InitiativeIdeationPipeline",
-    "InitiativeValidationPipeline",
-    "InitiativeBuildPipeline",
-    "InitiativeTestPipeline",
-    "InitiativeLaunchPipeline",
-    "InitiativeScalePipeline",
-    "INITIATIVE_WORKFLOWS",
+    # Factory functions for workflow creation
+    "create_initiative_ideation_pipeline",
+    "create_initiative_validation_pipeline",
+    "create_initiative_build_pipeline",
+    "create_initiative_test_pipeline",
+    "create_initiative_launch_pipeline",
+    "create_initiative_scale_pipeline",
+    # Registry for dynamic access
+    "INITIATIVE_WORKFLOW_FACTORIES",
 ]

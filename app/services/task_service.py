@@ -1,23 +1,26 @@
 """TaskService - CRUD operations for task management.
 
 This service provides Create, Read, Update, Delete operations for tasks
-stored in the ai_jobs table in Supabase.
+stored in the ai_jobs table in Supabase with proper RLS authentication.
 """
 
-import os
 from typing import Optional
-from supabase import create_client, Client
+from app.services.base_service import BaseService
 
 
-class TaskService:
-    """Service for managing tasks in the ai_jobs table."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+class TaskService(BaseService):
+    """Service for managing tasks in the ai_jobs table.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the task service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._table_name = "ai_jobs"
 
     async def create_task(

@@ -18,27 +18,80 @@ This module defines the Skill model and SkillsRegistry class that provides
 a centralized way for agents to access domain-specific knowledge and tools.
 """
 
+from enum import Enum
 from typing import Callable, Any
 from pydantic import BaseModel, Field
 
 
+class AgentID(str, Enum):
+    """Unique identifiers for all agents in the Pikar AI ecosystem.
+
+    Each agent has a short ID that can be used to map skills to agents.
+    Skills can be assigned to multiple agents via their agent_ids field.
+    """
+    # Executive Agent - Central Orchestrator
+    EXEC = "EXEC"      # ExecutiveAgent - Chief of Staff
+
+    # Specialized Domain Agents
+    FIN = "FIN"        # FinancialAnalysisAgent - CFO / Financial Analyst
+    CONT = "CONT"      # ContentCreationAgent - CMO / Creative Director
+    STRAT = "STRAT"    # StrategicPlanningAgent - Chief Strategy Officer
+    SALES = "SALES"    # SalesIntelligenceAgent - Head of Sales
+    MKT = "MKT"        # MarketingAutomationAgent - Marketing Director
+    OPS = "OPS"        # OperationsOptimizationAgent - COO / Operations Manager
+    HR = "HR"          # HRRecruitmentAgent - Human Resources Manager
+    LEGAL = "LEGAL"    # ComplianceRiskAgent - Legal Counsel
+    SUPP = "SUPP"      # CustomerSupportAgent - CTO / IT Support
+    DATA = "DATA"      # DataAnalysisAgent - Data Analyst
+
+    # Reserved for future agents (extensibility)
+    # PRODUCT = "PRODUCT"    # ProductManagementAgent
+    # RESEARCH = "RESEARCH"  # MarketResearchAgent
+    # CUSTOMER = "CUSTOMER"  # CustomerSuccessAgent
+
+
+# Mapping from AgentID to agent class names for reference
+AGENT_ID_TO_NAME = {
+    AgentID.EXEC: "ExecutiveAgent",
+    AgentID.FIN: "FinancialAnalysisAgent",
+    AgentID.CONT: "ContentCreationAgent",
+    AgentID.STRAT: "StrategicPlanningAgent",
+    AgentID.SALES: "SalesIntelligenceAgent",
+    AgentID.MKT: "MarketingAutomationAgent",
+    AgentID.OPS: "OperationsOptimizationAgent",
+    AgentID.HR: "HRRecruitmentAgent",
+    AgentID.LEGAL: "ComplianceRiskAgent",
+    AgentID.SUPP: "CustomerSupportAgent",
+    AgentID.DATA: "DataAnalysisAgent",
+}
+
+
 class Skill(BaseModel):
     """A modular capability or knowledge unit that agents can use.
-    
+
     Skills can be:
     - Knowledge-based: Provide context/instructions (e.g., SEO checklist)
     - Function-based: Provide executable logic (e.g., calculation)
+
+    Each skill is mapped to one or more agents via the agent_ids field.
+    This allows agents to query which skills they have access to.
     """
     name: str = Field(..., description="Unique identifier for the skill")
     description: str = Field(..., description="What this skill does")
     category: str = Field(..., description="Category: finance, hr, marketing, sales, compliance, content, data, support, operations")
-    
+
+    # Agent mapping - which agents can use this skill
+    agent_ids: list[AgentID] = Field(
+        default_factory=list,
+        description="List of agent IDs that can use this skill. Empty list means available to all agents."
+    )
+
     # Knowledge content (for prompt injection)
     knowledge: str | None = Field(default=None, description="Domain knowledge to inject into agent context")
-    
+
     # Optional callable for function-based skills
     implementation: Callable[..., Any] | None = Field(default=None, exclude=True, description="Optional function implementation")
-    
+
     class Config:
         arbitrary_types_allowed = True
 
@@ -78,7 +131,39 @@ class SkillsRegistry:
     def get_by_category(self, category: str) -> list[Skill]:
         """Get all skills in a category."""
         return [s for s in self._skills.values() if s.category == category]
-    
+
+    def get_by_agent_id(self, agent_id: AgentID) -> list[Skill]:
+        """Get all skills assigned to a specific agent.
+
+        Args:
+            agent_id: The agent ID to filter skills by.
+
+        Returns:
+            List of skills that the agent has access to.
+            Skills with empty agent_ids list are considered available to all.
+        """
+        return [
+            s for s in self._skills.values()
+            if agent_id in s.agent_ids or len(s.agent_ids) == 0
+        ]
+
+    def get_agent_skills_summary(self, agent_id: AgentID) -> dict[str, list[str]]:
+        """Get a summary of skills for an agent, organized by category.
+
+        Args:
+            agent_id: The agent ID to get skills for.
+
+        Returns:
+            Dictionary mapping category -> list of skill names.
+        """
+        skills = self.get_by_agent_id(agent_id)
+        summary: dict[str, list[str]] = {}
+        for skill in skills:
+            if skill.category not in summary:
+                summary[skill.category] = []
+            summary[skill.category].append(skill.name)
+        return summary
+
     def list_all(self) -> list[Skill]:
         """List all registered skills."""
         return list(self._skills.values())

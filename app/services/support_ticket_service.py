@@ -1,23 +1,27 @@
 """SupportTicketService - CRUD operations for customer support tickets.
 
 This service provides Create, Read, Update, Delete operations for tickets
-stored in Supabase. Used by CustomerSupportAgent.
+stored in Supabase with proper RLS authentication.
+Used by CustomerSupportAgent.
 """
 
-import os
-from typing import Optional, List, Dict
-from supabase import create_client, Client
+from typing import Optional, List
+from app.services.base_service import BaseService
 
 
-class SupportTicketService:
-    """Service for managing support tickets."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+class SupportTicketService(BaseService):
+    """Service for managing support tickets.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the support ticket service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._table_name = "support_tickets"
 
     async def create_ticket(

@@ -21,18 +21,19 @@ This module implements 5 workflow agents for documentation:
 48. BoardPresentationPipeline - Board meeting preparation
 49. WeeklyBriefingPipeline - Automated weekly executive brief
 
-Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
 from google.adk.agents import SequentialAgent, ParallelAgent
 
 from app.agents.specialized_agents import (
-    strategic_agent,
-    content_agent,
-    data_agent,
-    financial_agent,
-    operations_agent,
-    compliance_agent,
+    create_strategic_agent,
+    create_content_agent,
+    create_data_agent,
+    create_financial_agent,
+    create_operations_agent,
+    create_compliance_agent,
 )
 
 
@@ -40,86 +41,112 @@ from app.agents.specialized_agents import (
 # 45. BusinessDocumentationPipeline
 # =============================================================================
 
-BusinessDocumentationPipeline = SequentialAgent(
-    name="BusinessDocumentationPipeline",
-    description="Business process documentation with compliance review",
-    sub_agents=[strategic_agent, content_agent, compliance_agent],
-)
+def create_business_documentation_pipeline() -> SequentialAgent:
+    """Create BusinessDocumentationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="BusinessDocumentationPipeline",
+        description="Business process documentation with compliance review",
+        sub_agents=[
+            create_strategic_agent(),
+            create_content_agent(),
+            create_compliance_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 46. ProjectDocumentationPipeline
 # =============================================================================
 
-ProjectDocumentationPipeline = SequentialAgent(
-    name="ProjectDocumentationPipeline",
-    description="Project documentation from operations to content to data",
-    sub_agents=[operations_agent, content_agent, data_agent],
-)
+def create_project_documentation_pipeline() -> SequentialAgent:
+    """Create ProjectDocumentationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="ProjectDocumentationPipeline",
+        description="Project documentation from operations to content to data",
+        sub_agents=[
+            create_operations_agent(),
+            create_content_agent(),
+            create_data_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 47. ReportCreationPipeline
 # =============================================================================
 
-_report_data_parallel = ParallelAgent(
-    name="ReportDataGathering",
-    description="Parallel data gathering from data and financial sources",
-    sub_agents=[data_agent, financial_agent],
-)
-
-ReportCreationPipeline = SequentialAgent(
-    name="ReportCreationPipeline",
-    description="Custom report generation with parallel data gathering",
-    sub_agents=[_report_data_parallel, content_agent],
-)
+def create_report_creation_pipeline() -> SequentialAgent:
+    """Create ReportCreationPipeline with fresh agent instances."""
+    report_data_parallel = ParallelAgent(
+        name="ReportDataGathering",
+        description="Parallel data gathering from data and financial sources",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="ReportCreationPipeline",
+        description="Custom report generation with parallel data gathering",
+        sub_agents=[report_data_parallel, create_content_agent()],
+    )
 
 
 # =============================================================================
 # 48. BoardPresentationPipeline
 # =============================================================================
 
-_board_parallel = ParallelAgent(
-    name="BoardPresentationGathering",
-    description="Parallel board presentation content from data, financial, and strategic",
-    sub_agents=[data_agent, financial_agent, strategic_agent],
-)
-
-BoardPresentationPipeline = SequentialAgent(
-    name="BoardPresentationPipeline",
-    description="Board meeting preparation with parallel analysis",
-    sub_agents=[_board_parallel],
-)
+def create_board_presentation_pipeline() -> SequentialAgent:
+    """Create BoardPresentationPipeline with fresh agent instances."""
+    board_parallel = ParallelAgent(
+        name="BoardPresentationGathering",
+        description="Parallel board presentation content from data, financial, and strategic",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="BoardPresentationPipeline",
+        description="Board meeting preparation with parallel analysis",
+        sub_agents=[board_parallel],
+    )
 
 
 # =============================================================================
 # 49. WeeklyBriefingPipeline
 # =============================================================================
 
-WeeklyBriefingPipeline = SequentialAgent(
-    name="WeeklyBriefingPipeline",
-    description="Automated weekly executive brief generation",
-    sub_agents=[data_agent, strategic_agent],
-)
+def create_weekly_briefing_pipeline() -> SequentialAgent:
+    """Create WeeklyBriefingPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="WeeklyBriefingPipeline",
+        description="Automated weekly executive brief generation",
+        sub_agents=[
+            create_data_agent(),
+            create_strategic_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-DOCUMENTATION_WORKFLOWS = [
-    BusinessDocumentationPipeline,
-    ProjectDocumentationPipeline,
-    ReportCreationPipeline,
-    BoardPresentationPipeline,
-    WeeklyBriefingPipeline,
-]
+DOCUMENTATION_WORKFLOW_FACTORIES = {
+    "BusinessDocumentationPipeline": create_business_documentation_pipeline,
+    "ProjectDocumentationPipeline": create_project_documentation_pipeline,
+    "ReportCreationPipeline": create_report_creation_pipeline,
+    "BoardPresentationPipeline": create_board_presentation_pipeline,
+    "WeeklyBriefingPipeline": create_weekly_briefing_pipeline,
+}
 
 __all__ = [
-    "BusinessDocumentationPipeline",
-    "ProjectDocumentationPipeline",
-    "ReportCreationPipeline",
-    "BoardPresentationPipeline",
-    "WeeklyBriefingPipeline",
-    "DOCUMENTATION_WORKFLOWS",
+    "create_business_documentation_pipeline",
+    "create_project_documentation_pipeline",
+    "create_report_creation_pipeline",
+    "create_board_presentation_pipeline",
+    "create_weekly_briefing_pipeline",
+    "DOCUMENTATION_WORKFLOW_FACTORIES",
 ]

@@ -1,23 +1,27 @@
 """RecruitmentService - CRUD operations for jobs and candidates.
 
 This service provides Create, Read, Update, Delete operations for job postings
-and candidates stored in Supabase. Used by HRRecruitmentAgent.
+and candidates stored in Supabase with proper RLS authentication.
+Used by HRRecruitmentAgent.
 """
 
-import os
-from typing import Optional, List, Dict
-from supabase import create_client, Client
+from typing import Optional, List
+from app.services.base_service import BaseService
 
 
-class RecruitmentService:
-    """Service for managing recruitment, jobs, and candidates."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+class RecruitmentService(BaseService):
+    """Service for managing recruitment, jobs, and candidates.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the recruitment service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._jobs_table = "recruitment_jobs"
         self._candidates_table = "recruitment_candidates"
 

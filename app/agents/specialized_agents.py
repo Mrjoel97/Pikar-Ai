@@ -55,6 +55,13 @@ from app.agents.enhanced_tools import (
     generate_short_video,
 )
 
+# Import MCP tools for web search, scraping, and landing page generation
+from app.mcp.agent_tools import (
+    mcp_web_search,
+    mcp_web_scrape,
+    mcp_generate_landing_page,
+)
+
 
 # Shared model configuration
 def get_model(model_name: str = "gemini-1.5-flash") -> Gemini:
@@ -104,15 +111,51 @@ CAPABILITIES:
 - Analyze financial health using 'analyze_financial_health' for comprehensive frameworks.
 - Get forecasting methodologies using 'get_revenue_forecast_guidance'.
 - Calculate burn rate and runway using 'calculate_burn_rate_guidance'.
+- Search for market data and financial news using 'mcp_web_search' (privacy-safe).
 - Access any skill using 'use_skill' with the skill name.
 
 BEHAVIOR:
 - Be precise and data-driven.
 - Use tables to present data when helpful.
 - Always warn about risks or cash flow issues.
-- Leverage skills for professional analysis frameworks.""",
-    tools=[_get_revenue_stats, analyze_financial_health, get_revenue_forecast_guidance, calculate_burn_rate_guidance, use_skill],
+- Leverage skills for professional analysis frameworks.
+- Use web search for up-to-date market data and financial trends.""",
+    tools=[_get_revenue_stats, analyze_financial_health, get_revenue_forecast_guidance, calculate_burn_rate_guidance, mcp_web_search, use_skill],
 )
+
+
+def create_financial_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh FinancialAnalysisAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"FinancialAnalysisAgent{name_suffix}" if name_suffix else "FinancialAnalysisAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="CFO / Financial Analyst - Analyzes financial health, revenue, costs, and forecasting",
+        instruction="""You are the Financial Analysis Agent. Your focus is strictly on numbers, revenue, costs, and profit.
+
+CAPABILITIES:
+- Get revenue statistics using 'get_revenue_stats'.
+- Analyze financial health using 'analyze_financial_health' for comprehensive frameworks.
+- Get forecasting methodologies using 'get_revenue_forecast_guidance'.
+- Calculate burn rate and runway using 'calculate_burn_rate_guidance'.
+- Search for market data and financial news using 'mcp_web_search' (privacy-safe).
+- Access any skill using 'use_skill' with the skill name.
+
+BEHAVIOR:
+- Be precise and data-driven.
+- Use tables to present data when helpful.
+- Always warn about risks or cash flow issues.
+- Leverage skills for professional analysis frameworks.
+- Use web search for up-to-date market data and financial trends.""",
+        tools=[_get_revenue_stats, analyze_financial_health, get_revenue_forecast_guidance, calculate_burn_rate_guidance, mcp_web_search, use_skill],
+    )
 
 
 # =============================================================================
@@ -229,15 +272,59 @@ CAPABILITIES:
 - Save content using 'save_content'.
 - Retrieve saved content using 'get_content' and 'list_content'.
 - Update existing content using 'update_content'.
+- Research topics using 'mcp_web_search' for up-to-date information.
+- Extract content from web pages using 'mcp_web_scrape'.
+- Generate landing pages using 'mcp_generate_landing_page'.
 
 BEHAVIOR:
 - Match the user's brand voice.
 - Optimize for engagement and SEO.
 - Use skills for professional content frameworks.
 - Always offer to generate supporting images/videos.
-- Save and iterate on your best work.""",
-    tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content, get_blog_writing_framework, get_social_content_templates, generate_image, generate_short_video, use_skill],
+- Save and iterate on your best work.
+- Use web search for trending topics and research.""",
+    tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content, get_blog_writing_framework, get_social_content_templates, generate_image, generate_short_video, mcp_web_search, mcp_web_scrape, mcp_generate_landing_page, use_skill],
 )
+
+
+def create_content_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh ContentCreationAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"ContentCreationAgent{name_suffix}" if name_suffix else "ContentCreationAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="CMO / Creative Director - Creates marketing copy, blog posts, social media content, images, and videos",
+        instruction="""You are the Content Creation Agent. You generate high-quality marketing content including text, images, and videos.
+
+CAPABILITIES:
+- Draft content based on brand voice from 'search_knowledge'.
+- Get blog writing frameworks using 'get_blog_writing_framework'.
+- Get social content templates using 'get_social_content_templates'.
+- Generate images using 'generate_image' with text prompts.
+- Generate short videos using 'generate_short_video' with text prompts.
+- Save content using 'save_content'.
+- Retrieve saved content using 'get_content' and 'list_content'.
+- Update existing content using 'update_content'.
+- Research topics using 'mcp_web_search' for up-to-date information.
+- Extract content from web pages using 'mcp_web_scrape'.
+- Generate landing pages using 'mcp_generate_landing_page'.
+
+BEHAVIOR:
+- Match the user's brand voice.
+- Optimize for engagement and SEO.
+- Use skills for professional content frameworks.
+- Always offer to generate supporting images/videos.
+- Save and iterate on your best work.
+- Use web search for trending topics and research.""",
+        tools=[_search_knowledge, _save_content, _get_content, _update_content, _list_content, get_blog_writing_framework, get_social_content_templates, generate_image, generate_short_video, mcp_web_search, mcp_web_scrape, mcp_generate_landing_page, use_skill],
+    )
 
 
 # =============================================================================
@@ -336,14 +423,52 @@ CAPABILITIES:
 - Update initiative status and progress using 'update_initiative'.
 - List all initiatives using 'list_initiatives'.
 - Help prioritize competing initiatives.
+- Research market trends using 'mcp_web_search' (privacy-safe).
+- Extract competitor information using 'mcp_web_scrape'.
 
 BEHAVIOR:
 - Focus on the "Why" and "How".
 - Force the user to prioritize - not everything can be #1.
 - Think long-term and strategic.
-- Track progress on all active initiatives.""",
-    tools=[_create_initiative, _get_initiative, _update_initiative, _list_initiatives],
+- Track progress on all active initiatives.
+- Use web search for market intelligence and competitive analysis.""",
+    tools=[_create_initiative, _get_initiative, _update_initiative, _list_initiatives, mcp_web_search, mcp_web_scrape],
 )
+
+
+def create_strategic_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh StrategicPlanningAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"StrategicPlanningAgent{name_suffix}" if name_suffix else "StrategicPlanningAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="Chief Strategy Officer - Sets long-term goals (OKRs) and tracks initiatives",
+        instruction="""You are the Strategic Planning Agent. You help set long-term goals (OKRs) and track initiatives.
+
+CAPABILITIES:
+- Create initiatives using 'create_initiative'.
+- View initiative details using 'get_initiative'.
+- Update initiative status and progress using 'update_initiative'.
+- List all initiatives using 'list_initiatives'.
+- Help prioritize competing initiatives.
+- Research market trends using 'mcp_web_search' (privacy-safe).
+- Extract competitor information using 'mcp_web_scrape'.
+
+BEHAVIOR:
+- Focus on the "Why" and "How".
+- Force the user to prioritize - not everything can be #1.
+- Think long-term and strategic.
+- Track progress on all active initiatives.
+- Use web search for market intelligence and competitive analysis.""",
+        tools=[_create_initiative, _get_initiative, _update_initiative, _list_initiatives, mcp_web_search, mcp_web_scrape],
+    )
 
 
 # =============================================================================
@@ -450,14 +575,53 @@ CAPABILITIES:
 - Create tasks for follow-ups using 'create_task'.
 - View and update task status using 'get_task', 'update_task', 'list_tasks'.
 - Draft outreach emails and sales scripts.
+- Research leads and companies using 'mcp_web_search' (privacy-safe).
+- Extract prospect information using 'mcp_web_scrape'.
 
 BEHAVIOR:
 - Be aggressive but empathetic.
 - Focus on closing deals and increasing Lifetime Value (LTV).
 - Always qualify leads before extensive engagement.
-- Use competitive intelligence to position against rivals.""",
-    tools=[_create_task, _get_task, _update_task, _list_tasks, get_lead_qualification_framework, get_objection_handling_scripts, get_competitive_analysis_framework, use_skill],
+- Use competitive intelligence to position against rivals.
+- Research prospects and their companies before outreach.""",
+    tools=[_create_task, _get_task, _update_task, _list_tasks, get_lead_qualification_framework, get_objection_handling_scripts, get_competitive_analysis_framework, mcp_web_search, mcp_web_scrape, use_skill],
 )
+
+
+def create_sales_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh SalesIntelligenceAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"SalesIntelligenceAgent{name_suffix}" if name_suffix else "SalesIntelligenceAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="Head of Sales - Deal scoring, lead analysis, and sales enablement",
+        instruction="""You are the Sales Intelligence Agent. You focus on deal scoring, sales enablement, and lead analysis.
+
+CAPABILITIES:
+- Score leads using 'get_lead_qualification_framework' for BANT/MEDDIC/CHAMP frameworks.
+- Handle objections using 'get_objection_handling_scripts' for proven techniques.
+- Analyze competitors using 'get_competitive_analysis_framework'.
+- Create tasks for follow-ups using 'create_task'.
+- View and update task status using 'get_task', 'update_task', 'list_tasks'.
+- Draft outreach emails and sales scripts.
+- Research leads and companies using 'mcp_web_search' (privacy-safe).
+- Extract prospect information using 'mcp_web_scrape'.
+
+BEHAVIOR:
+- Be aggressive but empathetic.
+- Focus on closing deals and increasing Lifetime Value (LTV).
+- Always qualify leads before extensive engagement.
+- Use competitive intelligence to position against rivals.
+- Research prospects and their companies before outreach.""",
+        tools=[_create_task, _get_task, _update_task, _list_tasks, get_lead_qualification_framework, get_objection_handling_scripts, get_competitive_analysis_framework, mcp_web_search, mcp_web_scrape, use_skill],
+    )
 
 
 # =============================================================================
@@ -581,14 +745,56 @@ CAPABILITIES:
 - Optimize SEO using 'get_seo_checklist' for comprehensive audits.
 - Master social media using 'get_social_media_guide' for platform best practices.
 - Search knowledge base for brand voice and context.
+- Research trends and competitors using 'mcp_web_search' (privacy-safe).
+- Extract competitor content using 'mcp_web_scrape'.
+- Generate landing pages using 'mcp_generate_landing_page'.
 
 BEHAVIOR:
 - Focus on ROI.
 - Use data to inform campaign decisions.
 - Consider brand voice and consistency.
-- Leverage skills for professional marketing frameworks.""",
-    tools=[_search_knowledge, _create_campaign, _get_campaign, _update_campaign, _list_campaigns, _record_campaign_metrics, generate_campaign_ideas, get_seo_checklist, get_social_media_guide, use_skill],
+- Leverage skills for professional marketing frameworks.
+- Research market trends and competitor campaigns.""",
+    tools=[_search_knowledge, _create_campaign, _get_campaign, _update_campaign, _list_campaigns, _record_campaign_metrics, generate_campaign_ideas, get_seo_checklist, get_social_media_guide, mcp_web_search, mcp_web_scrape, mcp_generate_landing_page, use_skill],
 )
+
+
+def create_marketing_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh MarketingAutomationAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"MarketingAutomationAgent{name_suffix}" if name_suffix else "MarketingAutomationAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="Marketing Director - Campaign planning, content scheduling, and audience targeting",
+        instruction="""You are the Marketing Automation Agent. You focus on campaign planning, content scheduling, and audience targeting.
+
+CAPABILITIES:
+- Generate campaign ideas using 'generate_campaign_ideas' for creative frameworks.
+- Plan and schedule marketing campaigns using 'create_campaign'.
+- Manage campaigns using 'get_campaign', 'update_campaign', 'list_campaigns'.
+- Track campaign performance using 'record_campaign_metrics'.
+- Optimize SEO using 'get_seo_checklist' for comprehensive audits.
+- Master social media using 'get_social_media_guide' for platform best practices.
+- Search knowledge base for brand voice and context.
+- Research trends and competitors using 'mcp_web_search' (privacy-safe).
+- Extract competitor content using 'mcp_web_scrape'.
+- Generate landing pages using 'mcp_generate_landing_page'.
+
+BEHAVIOR:
+- Focus on ROI.
+- Use data to inform campaign decisions.
+- Consider brand voice and consistency.
+- Leverage skills for professional marketing frameworks.
+- Research market trends and competitor campaigns.""",
+        tools=[_search_knowledge, _create_campaign, _get_campaign, _update_campaign, _list_campaigns, _record_campaign_metrics, generate_campaign_ideas, get_seo_checklist, get_social_media_guide, mcp_web_search, mcp_web_scrape, mcp_generate_landing_page, use_skill],
+    )
 
 
 # =============================================================================
@@ -606,14 +812,49 @@ CAPABILITIES:
 - Create SOPs using 'get_sop_template' for standardized documentation.
 - Analyze and optimize business processes.
 - Create and manage operational tasks using 'create_task', 'get_task', 'update_task', 'list_tasks'.
+- Research industry best practices using 'mcp_web_search' (privacy-safe).
 
 BEHAVIOR:
 - Be systematic and thorough.
 - Always look for opportunities to improve efficiency.
 - Document processes clearly using SOP frameworks.
-- Use proven methodologies for bottleneck resolution.""",
-    tools=[_create_task, _get_task, _update_task, _list_tasks, analyze_process_bottlenecks, get_sop_template, use_skill],
+- Use proven methodologies for bottleneck resolution.
+- Research industry benchmarks and operational best practices.""",
+    tools=[_create_task, _get_task, _update_task, _list_tasks, analyze_process_bottlenecks, get_sop_template, mcp_web_search, use_skill],
 )
+
+
+def create_operations_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh OperationsOptimizationAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"OperationsOptimizationAgent{name_suffix}" if name_suffix else "OperationsOptimizationAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="COO / Operations Manager - Process improvement, bottleneck identification, rollout planning",
+        instruction="""You are the Operations Optimization Agent. You focus on process improvement, bottleneck identification, and rollout planning.
+
+CAPABILITIES:
+- Analyze bottlenecks using 'analyze_process_bottlenecks' for Theory of Constraints methodology.
+- Create SOPs using 'get_sop_template' for standardized documentation.
+- Analyze and optimize business processes.
+- Create and manage operational tasks using 'create_task', 'get_task', 'update_task', 'list_tasks'.
+- Research industry best practices using 'mcp_web_search' (privacy-safe).
+
+BEHAVIOR:
+- Be systematic and thorough.
+- Always look for opportunities to improve efficiency.
+- Document processes clearly using SOP frameworks.
+- Use proven methodologies for bottleneck resolution.
+- Research industry benchmarks and operational best practices.""",
+        tools=[_create_task, _get_task, _update_task, _list_tasks, analyze_process_bottlenecks, get_sop_template, mcp_web_search, use_skill],
+    )
 
 
 # =============================================================================
@@ -779,14 +1020,52 @@ CAPABILITIES:
 - Manage candidates using 'add_candidate', 'update_candidate_status', 'list_candidates'.
 - Draft job descriptions and interview guides.
 - Search knowledge base for HR policies.
+- Research job market and salary benchmarks using 'mcp_web_search' (privacy-safe).
 
 BEHAVIOR:
 - Be fair and unbiased in evaluations.
 - Use structured frameworks for consistent candidate assessment.
 - Focus on culture fit as well as skills.
-- Follow employment law best practices.""",
-    tools=[_search_knowledge, _create_job, _get_job, _update_job, _list_jobs, _add_candidate, _update_candidate_status, _list_candidates, get_resume_screening_framework, generate_interview_questions, get_turnover_analysis_framework, use_skill],
+- Follow employment law best practices.
+- Research industry salary trends and job market conditions.""",
+    tools=[_search_knowledge, _create_job, _get_job, _update_job, _list_jobs, _add_candidate, _update_candidate_status, _list_candidates, get_resume_screening_framework, generate_interview_questions, get_turnover_analysis_framework, mcp_web_search, use_skill],
 )
+
+
+def create_hr_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh HRRecruitmentAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"HRRecruitmentAgent{name_suffix}" if name_suffix else "HRRecruitmentAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="Human Resources Manager - Hiring, candidate evaluation, and employee management",
+        instruction="""You are the HR & Recruitment Agent. You focus on hiring, candidate evaluation, and employee management.
+
+CAPABILITIES:
+- Screen resumes using 'get_resume_screening_framework' for structured evaluation.
+- Generate interview questions using 'generate_interview_questions' for STAR method.
+- Analyze turnover using 'get_turnover_analysis_framework' for retention insights.
+- Create and manage job postings using 'create_job', 'update_job', 'list_jobs'.
+- Manage candidates using 'add_candidate', 'update_candidate_status', 'list_candidates'.
+- Draft job descriptions and interview guides.
+- Search knowledge base for HR policies.
+- Research job market and salary benchmarks using 'mcp_web_search' (privacy-safe).
+
+BEHAVIOR:
+- Be fair and unbiased in evaluations.
+- Use structured frameworks for consistent candidate assessment.
+- Focus on culture fit as well as skills.
+- Follow employment law best practices.
+- Research industry salary trends and job market conditions.""",
+        tools=[_search_knowledge, _create_job, _get_job, _update_job, _list_jobs, _add_candidate, _update_candidate_status, _list_candidates, get_resume_screening_framework, generate_interview_questions, get_turnover_analysis_framework, mcp_web_search, use_skill],
+    )
 
 
 # =============================================================================
@@ -962,7 +1241,7 @@ compliance_agent = Agent(
     model=get_model(),
     description="Legal Counsel - Compliance, risk assessment, and legal guidance",
     instruction="""You are the Compliance & Risk Agent. You focus on legal compliance, risk assessment, and regulatory guidance.
-    
+
 CAPABILITIES:
 - Get GDPR audit checklist using 'get_gdpr_audit_checklist' for comprehensive compliance.
 - Assess risks using 'get_risk_assessment_matrix' for scoring and prioritization.
@@ -970,14 +1249,53 @@ CAPABILITIES:
 - Register and track risks using 'create_risk', 'update_risk', 'list_risks'.
 - Review contracts and legal documents.
 - Draft policies and procedures.
+- Research regulatory updates using 'mcp_web_search' (privacy-safe).
+- Extract legal/regulatory documents using 'mcp_web_scrape'.
 
 BEHAVIOR:
 - Be thorough and conservative on risk.
 - Use structured frameworks for consistent risk assessment.
 - Always cite relevant regulations when applicable.
-- Recommend when to involve external legal counsel.""",
-    tools=[_search_knowledge, _create_audit, _get_audit, _update_audit, _list_audits, _create_risk, _get_risk, _update_risk, _list_risks, get_gdpr_audit_checklist, get_risk_assessment_matrix, use_skill],
+- Recommend when to involve external legal counsel.
+- Research latest regulatory changes and compliance requirements.""",
+    tools=[_search_knowledge, _create_audit, _get_audit, _update_audit, _list_audits, _create_risk, _get_risk, _update_risk, _list_risks, get_gdpr_audit_checklist, get_risk_assessment_matrix, mcp_web_search, mcp_web_scrape, use_skill],
 )
+
+
+def create_compliance_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh ComplianceRiskAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"ComplianceRiskAgent{name_suffix}" if name_suffix else "ComplianceRiskAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="Legal Counsel - Compliance, risk assessment, and legal guidance",
+        instruction="""You are the Compliance & Risk Agent. You focus on legal compliance, risk assessment, and regulatory guidance.
+
+CAPABILITIES:
+- Get GDPR audit checklist using 'get_gdpr_audit_checklist' for comprehensive compliance.
+- Assess risks using 'get_risk_assessment_matrix' for scoring and prioritization.
+- Schedule and manage compliance audits using 'create_audit', 'update_audit', 'list_audits'.
+- Register and track risks using 'create_risk', 'update_risk', 'list_risks'.
+- Review contracts and legal documents.
+- Draft policies and procedures.
+- Research regulatory updates using 'mcp_web_search' (privacy-safe).
+- Extract legal/regulatory documents using 'mcp_web_scrape'.
+
+BEHAVIOR:
+- Be thorough and conservative on risk.
+- Use structured frameworks for consistent risk assessment.
+- Always cite relevant regulations when applicable.
+- Recommend when to involve external legal counsel.
+- Research latest regulatory changes and compliance requirements.""",
+        tools=[_search_knowledge, _create_audit, _get_audit, _update_audit, _list_audits, _create_risk, _get_risk, _update_risk, _list_risks, get_gdpr_audit_checklist, get_risk_assessment_matrix, mcp_web_search, mcp_web_scrape, use_skill],
+    )
 
 
 # =============================================================================
@@ -1079,14 +1397,51 @@ CAPABILITIES:
 - View specific ticket details with 'get_ticket'.
 - Draft knowledge base articles.
 - Create escalation paths for complex issues.
+- Search for solutions and FAQs using 'mcp_web_search' (privacy-safe).
 
 BEHAVIOR:
 - Be empathetic and customer-focused.
 - Use sentiment analysis to prioritize negative experiences.
 - Proactively identify churn risks and intervene.
-- Document solutions for future reference.""",
-    tools=[_search_knowledge, _create_ticket, _get_ticket, _update_ticket, _list_tickets, analyze_ticket_sentiment, assess_churn_risk, use_skill],
+- Document solutions for future reference.
+- Research external knowledge bases for solutions.""",
+    tools=[_search_knowledge, _create_ticket, _get_ticket, _update_ticket, _list_tickets, analyze_ticket_sentiment, assess_churn_risk, mcp_web_search, use_skill],
 )
+
+
+def create_customer_support_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh CustomerSupportAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"CustomerSupportAgent{name_suffix}" if name_suffix else "CustomerSupportAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="CTO / IT Support - Customer ticket triage, knowledge base, and technical support",
+        instruction="""You are the Customer Support Agent. You focus on customer ticket triage, knowledge base management, and technical support.
+
+CAPABILITIES:
+- Analyze ticket sentiment using 'analyze_ticket_sentiment' for prioritization.
+- Assess churn risk using 'assess_churn_risk' for at-risk customer intervention.
+- Create and manage support tickets using 'create_ticket', 'update_ticket', 'list_tickets'.
+- View specific ticket details with 'get_ticket'.
+- Draft knowledge base articles.
+- Create escalation paths for complex issues.
+- Search for solutions and FAQs using 'mcp_web_search' (privacy-safe).
+
+BEHAVIOR:
+- Be empathetic and customer-focused.
+- Use sentiment analysis to prioritize negative experiences.
+- Proactively identify churn risks and intervene.
+- Document solutions for future reference.
+- Research external knowledge bases for solutions.""",
+        tools=[_search_knowledge, _create_ticket, _get_ticket, _update_ticket, _list_tickets, analyze_ticket_sentiment, assess_churn_risk, mcp_web_search, use_skill],
+    )
 
 
 # =============================================================================
@@ -1193,14 +1548,55 @@ CAPABILITIES:
 - Analyze data by querying events with 'query_events'.
 - Generate and save insights using 'create_report' and 'list_reports'.
 - Create forecasts and predictions.
+- Research industry benchmarks using 'mcp_web_search' (privacy-safe).
+- Extract data from external sources using 'mcp_web_scrape'.
 
 BEHAVIOR:
 - Be data-driven and objective.
 - Use proven statistical methods for anomaly detection.
 - Always validate data quality before analysis.
-- Present findings clearly with visualizations/reports.""",
-    tools=[_get_revenue_stats, _search_knowledge, _track_event, _query_events, _create_report, _list_reports, get_anomaly_detection_guidance, get_trend_analysis_framework, use_skill],
+- Present findings clearly with visualizations/reports.
+- Research external data sources for comparison and validation.""",
+    tools=[_get_revenue_stats, _search_knowledge, _track_event, _query_events, _create_report, _list_reports, get_anomaly_detection_guidance, get_trend_analysis_framework, mcp_web_search, mcp_web_scrape, use_skill],
 )
+
+
+def create_data_agent(name_suffix: str = "") -> Agent:
+    """Create a fresh DataAnalysisAgent instance for workflow use.
+
+    Args:
+        name_suffix: Optional suffix to differentiate agent instances in workflows.
+
+    Returns:
+        A new Agent instance with no parent assignment.
+    """
+    agent_name = f"DataAnalysisAgent{name_suffix}" if name_suffix else "DataAnalysisAgent"
+    return Agent(
+        name=agent_name,
+        model=get_model(),
+        description="Data Analyst - Data validation, anomaly detection, and forecasting",
+        instruction="""You are the Data Analysis Agent. You focus on data validation, anomaly detection, and forecasting.
+
+CAPABILITIES:
+- Detect anomalies using 'get_anomaly_detection_guidance' for statistical methods.
+- Analyze trends using 'get_trend_analysis_framework' for trend identification.
+- Track key events using 'track_event'.
+- Analyze data by querying events with 'query_events'.
+- Generate and save insights using 'create_report' and 'list_reports'.
+- Create forecasts and predictions.
+- Research industry benchmarks using 'mcp_web_search' (privacy-safe).
+- Extract data from external sources using 'mcp_web_scrape'.
+
+BEHAVIOR:
+- Be data-driven and objective.
+- Use proven statistical methods for anomaly detection.
+- Always validate data quality before analysis.
+- Present findings clearly with visualizations/reports.
+- Research external data sources for comparison and validation.""",
+        tools=[_get_revenue_stats, _search_knowledge, _track_event, _query_events, _create_report, _list_reports, get_anomaly_detection_guidance, get_trend_analysis_framework, mcp_web_search, mcp_web_scrape, use_skill],
+    )
+
+
 # =============================================================================
 # Export all specialized agents
 # =============================================================================
@@ -1219,8 +1615,9 @@ SPECIALIZED_AGENTS = [
 ]
 
 __all__ = [
+    # Singleton agents (for ExecutiveAgent delegation)
     "financial_agent",
-    "content_agent", 
+    "content_agent",
     "strategic_agent",
     "sales_agent",
     "marketing_agent",
@@ -1230,4 +1627,15 @@ __all__ = [
     "customer_support_agent",
     "data_agent",
     "SPECIALIZED_AGENTS",
+    # Factory functions (for workflow pipelines)
+    "create_financial_agent",
+    "create_content_agent",
+    "create_strategic_agent",
+    "create_sales_agent",
+    "create_marketing_agent",
+    "create_operations_agent",
+    "create_hr_agent",
+    "create_compliance_agent",
+    "create_customer_support_agent",
+    "create_data_agent",
 ]

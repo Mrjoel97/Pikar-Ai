@@ -1,23 +1,27 @@
 """ComplianceService - CRUD operations for audits and risk assessments.
 
-This service Provides management for compliance audits and risk items,
-stored in Supabase. Used by ComplianceRiskAgent.
+This service provides management for compliance audits and risk items,
+stored in Supabase with proper RLS authentication.
+Used by ComplianceRiskAgent.
 """
 
-import os
-from typing import Optional, List, Dict
-from supabase import create_client, Client
+from typing import Optional, List
+from app.services.base_service import BaseService
 
 
-class ComplianceService:
-    """Service for managing compliance audits and risk assessments."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+class ComplianceService(BaseService):
+    """Service for managing compliance audits and risk assessments.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the compliance service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._audits_table = "compliance_audits"
         self._risks_table = "compliance_risks"
 

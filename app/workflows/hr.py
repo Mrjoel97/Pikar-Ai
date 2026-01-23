@@ -20,16 +20,17 @@ This module implements 4 workflow agents for HR operations:
 43. OnboardingPipeline - New employee onboarding
 44. PerformanceReviewPipeline - Employee performance analysis
 
-Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
-from google.adk.agents import SequentialAgent
+from google.adk.agents import SequentialAgent, LoopAgent
 
 from app.agents.specialized_agents import (
-    content_agent,
-    data_agent,
-    operations_agent,
-    hr_agent,
+    create_content_agent,
+    create_data_agent,
+    create_operations_agent,
+    create_hr_agent,
 )
 
 
@@ -37,61 +38,89 @@ from app.agents.specialized_agents import (
 # 41. TeamTrainingPipeline
 # =============================================================================
 
-TeamTrainingPipeline = SequentialAgent(
-    name="TeamTrainingPipeline",
-    description="Training program creation from HR to content to operations",
-    sub_agents=[hr_agent, content_agent, operations_agent],
-)
+def create_team_training_pipeline() -> SequentialAgent:
+    """Create TeamTrainingPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="TeamTrainingPipeline",
+        description="Training program creation from HR to content to operations",
+        sub_agents=[
+            create_hr_agent(),
+            create_content_agent(),
+            create_operations_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 42. RecruitmentPipeline
 # =============================================================================
 
-RecruitmentPipeline = SequentialAgent(
-    name="RecruitmentPipeline",
-    description="End-to-end hiring workflow with HR and data involvement",
-    sub_agents=[hr_agent, data_agent],
-)
+def create_recruitment_pipeline() -> SequentialAgent:
+    """Create RecruitmentPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="RecruitmentPipeline",
+        description="End-to-end hiring workflow with HR and data involvement",
+        sub_agents=[
+            create_hr_agent(),
+            create_data_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 43. OnboardingPipeline
 # =============================================================================
 
-OnboardingPipeline = SequentialAgent(
-    name="OnboardingPipeline",
-    description="New employee onboarding through HR, content, and operations",
-    sub_agents=[hr_agent, content_agent, operations_agent],
-)
+def create_onboarding_pipeline() -> SequentialAgent:
+    """Create OnboardingPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="OnboardingPipeline",
+        description="New employee onboarding through HR, content, and operations",
+        sub_agents=[
+            create_hr_agent(),
+            create_content_agent(),
+            create_operations_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 44. PerformanceReviewPipeline
 # =============================================================================
 
-PerformanceReviewPipeline = SequentialAgent(
-    name="PerformanceReviewPipeline",
-    description="Employee performance analysis with HR and data review",
-    sub_agents=[hr_agent, data_agent],
-)
+def create_performance_review_pipeline() -> LoopAgent:
+    """Create PerformanceReviewPipeline with fresh agent instances."""
+    performance_review_cycle = SequentialAgent(
+        name="PerformanceReviewCycle",
+        description="Single iteration of performance analysis and feedback development",
+        sub_agents=[
+            create_hr_agent(),
+            create_data_agent(),
+        ],
+    )
+    return LoopAgent(
+        name="PerformanceReviewPipeline",
+        description="Iterative employee performance analysis with feedback refinement until comprehensive review complete",
+        sub_agents=[performance_review_cycle],
+        max_iterations=3,
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-HR_WORKFLOWS = [
-    TeamTrainingPipeline,
-    RecruitmentPipeline,
-    OnboardingPipeline,
-    PerformanceReviewPipeline,
-]
+HR_WORKFLOW_FACTORIES = {
+    "TeamTrainingPipeline": create_team_training_pipeline,
+    "RecruitmentPipeline": create_recruitment_pipeline,
+    "OnboardingPipeline": create_onboarding_pipeline,
+    "PerformanceReviewPipeline": create_performance_review_pipeline,
+}
 
 __all__ = [
-    "TeamTrainingPipeline",
-    "RecruitmentPipeline",
-    "OnboardingPipeline",
-    "PerformanceReviewPipeline",
-    "HR_WORKFLOWS",
+    "create_team_training_pipeline",
+    "create_recruitment_pipeline",
+    "create_onboarding_pipeline",
+    "create_performance_review_pipeline",
+    "HR_WORKFLOW_FACTORIES",
 ]

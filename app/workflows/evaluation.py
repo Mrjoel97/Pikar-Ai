@@ -22,19 +22,20 @@ This module implements 6 workflow agents for business analysis:
 35. CompetitorAnalysisPipeline - Competitive intelligence
 36. MarketResearchPipeline - Comprehensive market analysis
 
-Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
 from google.adk.agents import SequentialAgent, ParallelAgent
 
 from app.agents.specialized_agents import (
-    strategic_agent,
-    content_agent,
-    data_agent,
-    financial_agent,
-    operations_agent,
-    marketing_agent,
-    sales_agent,
+    create_strategic_agent,
+    create_content_agent,
+    create_data_agent,
+    create_financial_agent,
+    create_operations_agent,
+    create_marketing_agent,
+    create_sales_agent,
 )
 
 
@@ -42,99 +43,132 @@ from app.agents.specialized_agents import (
 # 31. BusinessEvaluationPipeline (Consensus Pattern)
 # =============================================================================
 
-_business_eval_parallel = ParallelAgent(
-    name="BusinessEvalConsensus",
-    description="Parallel 360° analysis from financial, data, and strategic perspectives",
-    sub_agents=[financial_agent, data_agent, strategic_agent],
-)
-
-BusinessEvaluationPipeline = SequentialAgent(
-    name="BusinessEvaluationPipeline",
-    description="360° business health assessment with multi-perspective consensus",
-    sub_agents=[_business_eval_parallel],
-)
+def create_business_evaluation_pipeline() -> SequentialAgent:
+    """Create BusinessEvaluationPipeline with fresh agent instances."""
+    business_eval_parallel = ParallelAgent(
+        name="BusinessEvalConsensus",
+        description="Parallel 360° analysis from financial, data, and strategic perspectives",
+        sub_agents=[
+            create_financial_agent(),
+            create_data_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="BusinessEvaluationPipeline",
+        description="360° business health assessment with multi-perspective consensus",
+        sub_agents=[business_eval_parallel],
+    )
 
 
 # =============================================================================
 # 32. ProjectEvaluationPipeline
 # =============================================================================
 
-ProjectEvaluationPipeline = SequentialAgent(
-    name="ProjectEvaluationPipeline",
-    description="Post-project analysis through data, operations, and financial review",
-    sub_agents=[data_agent, operations_agent, financial_agent],
-)
+def create_project_evaluation_pipeline() -> SequentialAgent:
+    """Create ProjectEvaluationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="ProjectEvaluationPipeline",
+        description="Post-project analysis through data, operations, and financial review",
+        sub_agents=[
+            create_data_agent(),
+            create_operations_agent(),
+            create_financial_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 33. UserActivityAnalysisPipeline
 # =============================================================================
 
-UserActivityAnalysisPipeline = SequentialAgent(
-    name="UserActivityAnalysisPipeline",
-    description="User behavior insights from data to marketing to sales",
-    sub_agents=[data_agent, marketing_agent, sales_agent],
-)
+def create_user_activity_analysis_pipeline() -> SequentialAgent:
+    """Create UserActivityAnalysisPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="UserActivityAnalysisPipeline",
+        description="User behavior insights from data to marketing to sales",
+        sub_agents=[
+            create_data_agent(),
+            create_marketing_agent(),
+            create_sales_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 34. GrowthEvaluationPipeline
 # =============================================================================
 
-GrowthEvaluationPipeline = SequentialAgent(
-    name="GrowthEvaluationPipeline",
-    description="Growth trajectory analysis through data, financial, and strategic lens",
-    sub_agents=[data_agent, financial_agent, strategic_agent],
-)
+def create_growth_evaluation_pipeline() -> SequentialAgent:
+    """Create GrowthEvaluationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="GrowthEvaluationPipeline",
+        description="Growth trajectory analysis through data, financial, and strategic lens",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+            create_strategic_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 35. CompetitorAnalysisPipeline
 # =============================================================================
 
-CompetitorAnalysisPipeline = SequentialAgent(
-    name="CompetitorAnalysisPipeline",
-    description="Competitive intelligence gathering and analysis",
-    sub_agents=[strategic_agent, data_agent, sales_agent],
-)
+def create_competitor_analysis_pipeline() -> SequentialAgent:
+    """Create CompetitorAnalysisPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="CompetitorAnalysisPipeline",
+        description="Competitive intelligence gathering and analysis",
+        sub_agents=[
+            create_strategic_agent(),
+            create_data_agent(),
+            create_sales_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 36. MarketResearchPipeline
 # =============================================================================
 
-_market_research_parallel = ParallelAgent(
-    name="MarketResearchGathering",
-    description="Parallel market data gathering from data and strategic perspectives",
-    sub_agents=[data_agent, strategic_agent],
-)
-
-MarketResearchPipeline = SequentialAgent(
-    name="MarketResearchPipeline",
-    description="Comprehensive market analysis with parallel research and content synthesis",
-    sub_agents=[_market_research_parallel, marketing_agent, content_agent],
-)
+def create_market_research_pipeline() -> SequentialAgent:
+    """Create MarketResearchPipeline with fresh agent instances."""
+    market_research_parallel = ParallelAgent(
+        name="MarketResearchGathering",
+        description="Parallel market data gathering from data and strategic perspectives",
+        sub_agents=[
+            create_data_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="MarketResearchPipeline",
+        description="Comprehensive market analysis with parallel research and content synthesis",
+        sub_agents=[market_research_parallel, create_marketing_agent(), create_content_agent()],
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-EVALUATION_WORKFLOWS = [
-    BusinessEvaluationPipeline,
-    ProjectEvaluationPipeline,
-    UserActivityAnalysisPipeline,
-    GrowthEvaluationPipeline,
-    CompetitorAnalysisPipeline,
-    MarketResearchPipeline,
-]
+EVALUATION_WORKFLOW_FACTORIES = {
+    "BusinessEvaluationPipeline": create_business_evaluation_pipeline,
+    "ProjectEvaluationPipeline": create_project_evaluation_pipeline,
+    "UserActivityAnalysisPipeline": create_user_activity_analysis_pipeline,
+    "GrowthEvaluationPipeline": create_growth_evaluation_pipeline,
+    "CompetitorAnalysisPipeline": create_competitor_analysis_pipeline,
+    "MarketResearchPipeline": create_market_research_pipeline,
+}
 
 __all__ = [
-    "BusinessEvaluationPipeline",
-    "ProjectEvaluationPipeline",
-    "UserActivityAnalysisPipeline",
-    "GrowthEvaluationPipeline",
-    "CompetitorAnalysisPipeline",
-    "MarketResearchPipeline",
-    "EVALUATION_WORKFLOWS",
+    "create_business_evaluation_pipeline",
+    "create_project_evaluation_pipeline",
+    "create_user_activity_analysis_pipeline",
+    "create_growth_evaluation_pipeline",
+    "create_competitor_analysis_pipeline",
+    "create_market_research_pipeline",
+    "EVALUATION_WORKFLOW_FACTORIES",
 ]

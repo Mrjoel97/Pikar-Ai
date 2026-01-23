@@ -20,16 +20,17 @@ This module implements 4 workflow agents for goal management:
 29. KPIDashboardPipeline - Real-time KPI aggregation
 30. QuarterlyReviewPipeline - Quarterly business review
 
-Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
 from google.adk.agents import SequentialAgent, ParallelAgent, LoopAgent
 
 from app.agents.specialized_agents import (
-    strategic_agent,
-    data_agent,
-    financial_agent,
-    sales_agent,
+    create_strategic_agent,
+    create_data_agent,
+    create_financial_agent,
+    create_sales_agent,
 )
 
 
@@ -37,74 +38,94 @@ from app.agents.specialized_agents import (
 # 27. OKRCreationPipeline
 # =============================================================================
 
-OKRCreationPipeline = SequentialAgent(
-    name="OKRCreationPipeline",
-    description="Create objectives and key results through strategic and data analysis",
-    sub_agents=[strategic_agent, data_agent],
-)
+def create_okr_creation_pipeline() -> SequentialAgent:
+    """Create OKRCreationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="OKRCreationPipeline",
+        description="Create objectives and key results through strategic and data analysis",
+        sub_agents=[
+            create_strategic_agent(),
+            create_data_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 28. GoalTrackingPipeline
 # =============================================================================
 
-_goal_tracking_cycle = SequentialAgent(
-    name="GoalTrackingCycle",
-    description="Single iteration of goal progress monitoring",
-    sub_agents=[data_agent, strategic_agent],
-)
-
-GoalTrackingPipeline = LoopAgent(
-    name="GoalTrackingPipeline",
-    description="Continuous goal progress monitoring with weekly iterations",
-    sub_agents=[_goal_tracking_cycle],
-    max_iterations=12,  # Quarterly tracking (12 weeks)
-)
+def create_goal_tracking_pipeline() -> LoopAgent:
+    """Create GoalTrackingPipeline with fresh agent instances."""
+    goal_tracking_cycle = SequentialAgent(
+        name="GoalTrackingCycle",
+        description="Single iteration of goal progress monitoring",
+        sub_agents=[
+            create_data_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return LoopAgent(
+        name="GoalTrackingPipeline",
+        description="Continuous goal progress monitoring with weekly iterations",
+        sub_agents=[goal_tracking_cycle],
+        max_iterations=12,  # Quarterly tracking (12 weeks)
+    )
 
 
 # =============================================================================
 # 29. KPIDashboardPipeline
 # =============================================================================
 
-_kpi_parallel = ParallelAgent(
-    name="KPIDataGathering",
-    description="Parallel KPI data collection from multiple sources",
-    sub_agents=[data_agent, financial_agent, sales_agent],
-)
-
-KPIDashboardPipeline = SequentialAgent(
-    name="KPIDashboardPipeline",
-    description="Real-time KPI aggregation with parallel data gathering",
-    sub_agents=[_kpi_parallel],
-)
+def create_kpi_dashboard_pipeline() -> SequentialAgent:
+    """Create KPIDashboardPipeline with fresh agent instances."""
+    kpi_parallel = ParallelAgent(
+        name="KPIDataGathering",
+        description="Parallel KPI data collection from multiple sources",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+            create_sales_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="KPIDashboardPipeline",
+        description="Real-time KPI aggregation with parallel data gathering",
+        sub_agents=[kpi_parallel],
+    )
 
 
 # =============================================================================
 # 30. QuarterlyReviewPipeline
 # =============================================================================
 
-QuarterlyReviewPipeline = SequentialAgent(
-    name="QuarterlyReviewPipeline",
-    description="Quarterly business review through comprehensive analysis",
-    sub_agents=[data_agent, financial_agent, strategic_agent],
-)
+def create_quarterly_review_pipeline() -> SequentialAgent:
+    """Create QuarterlyReviewPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="QuarterlyReviewPipeline",
+        description="Quarterly business review through comprehensive analysis",
+        sub_agents=[
+            create_data_agent(),
+            create_financial_agent(),
+            create_strategic_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-GOALS_WORKFLOWS = [
-    OKRCreationPipeline,
-    GoalTrackingPipeline,
-    KPIDashboardPipeline,
-    QuarterlyReviewPipeline,
-]
+GOALS_WORKFLOW_FACTORIES = {
+    "OKRCreationPipeline": create_okr_creation_pipeline,
+    "GoalTrackingPipeline": create_goal_tracking_pipeline,
+    "KPIDashboardPipeline": create_kpi_dashboard_pipeline,
+    "QuarterlyReviewPipeline": create_quarterly_review_pipeline,
+}
 
 __all__ = [
-    "OKRCreationPipeline",
-    "GoalTrackingPipeline",
-    "KPIDashboardPipeline",
-    "QuarterlyReviewPipeline",
-    "GOALS_WORKFLOWS",
+    "create_okr_creation_pipeline",
+    "create_goal_tracking_pipeline",
+    "create_kpi_dashboard_pipeline",
+    "create_quarterly_review_pipeline",
+    "GOALS_WORKFLOW_FACTORIES",
 ]

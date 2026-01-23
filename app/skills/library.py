@@ -20,7 +20,7 @@ with specialized domain knowledge and executable functions.
 
 from typing import Any
 
-from app.skills.registry import Skill, skills_registry
+from app.skills.registry import AgentID, Skill, skills_registry
 
 
 # =============================================================================
@@ -31,6 +31,7 @@ analyze_financial_statement = Skill(
     name="analyze_financial_statement",
     description="Framework for analyzing financial statements including balance sheets, income statements, and cash flow statements.",
     category="finance",
+    agent_ids=[AgentID.FIN, AgentID.EXEC],
     knowledge="""
 ## Financial Statement Analysis Framework
 
@@ -69,6 +70,7 @@ forecast_revenue_growth = Skill(
     name="forecast_revenue_growth",
     description="Methodology for forecasting revenue growth using various projection techniques.",
     category="finance",
+    agent_ids=[AgentID.FIN, AgentID.DATA, AgentID.STRAT],
     knowledge="""
 ## Revenue Forecasting Framework
 
@@ -109,6 +111,7 @@ calculate_burn_rate = Skill(
     name="calculate_burn_rate",
     description="Calculate monthly burn rate and runway for startups and cash-conscious companies.",
     category="finance",
+    agent_ids=[AgentID.FIN, AgentID.EXEC],
     knowledge="""
 ## Burn Rate Calculation
 
@@ -146,6 +149,7 @@ resume_screening = Skill(
     name="resume_screening",
     description="Structured approach for screening resumes and evaluating candidates.",
     category="hr",
+    agent_ids=[AgentID.HR],
     knowledge="""
 ## Resume Screening Framework
 
@@ -189,6 +193,7 @@ interview_question_generator = Skill(
     name="interview_question_generator",
     description="Generate structured behavioral and technical interview questions.",
     category="hr",
+    agent_ids=[AgentID.HR],
     knowledge="""
 ## Interview Question Framework
 
@@ -236,6 +241,7 @@ employee_turnover_analysis = Skill(
     name="employee_turnover_analysis",
     description="Framework for calculating and analyzing employee turnover metrics.",
     category="hr",
+    agent_ids=[AgentID.HR, AgentID.DATA],
     knowledge="""
 ## Employee Turnover Analysis
 
@@ -286,6 +292,7 @@ campaign_ideation = Skill(
     name="campaign_ideation",
     description="Creative framework for generating marketing campaign ideas.",
     category="marketing",
+    agent_ids=[AgentID.MKT, AgentID.CONT],
     knowledge="""
 ## Campaign Ideation Framework
 
@@ -339,6 +346,7 @@ seo_checklist = Skill(
     name="seo_checklist",
     description="Comprehensive SEO audit and optimization checklist.",
     category="marketing",
+    agent_ids=[AgentID.MKT, AgentID.CONT],
     knowledge="""
 ## SEO Optimization Checklist
 
@@ -389,6 +397,7 @@ social_media_guide = Skill(
     name="social_media_guide",
     description="Best practices guide for social media content and strategy.",
     category="marketing",
+    agent_ids=[AgentID.MKT, AgentID.CONT],
     knowledge="""
 ## Social Media Best Practices
 
@@ -447,6 +456,7 @@ lead_qualification_framework = Skill(
     name="lead_qualification_framework",
     description="Structured frameworks for qualifying sales leads (BANT, MEDDIC, CHAMP).",
     category="sales",
+    agent_ids=[AgentID.SALES],
     knowledge="""
 ## Lead Qualification Frameworks
 
@@ -491,6 +501,7 @@ objection_handling = Skill(
     name="objection_handling",
     description="Techniques and scripts for handling common sales objections.",
     category="sales",
+    agent_ids=[AgentID.SALES],
     knowledge="""
 ## Objection Handling Framework
 
@@ -537,6 +548,7 @@ competitive_analysis = Skill(
     name="competitive_analysis",
     description="Framework for analyzing competitors and positioning against them.",
     category="sales",
+    agent_ids=[AgentID.SALES, AgentID.MKT, AgentID.STRAT],
     knowledge="""
 ## Competitive Intelligence Framework
 
@@ -592,6 +604,7 @@ gdpr_audit_checklist = Skill(
     name="gdpr_audit_checklist",
     description="Comprehensive GDPR compliance audit checklist.",
     category="compliance",
+    agent_ids=[AgentID.LEGAL],
     knowledge="""
 ## GDPR Compliance Audit Checklist
 
@@ -642,6 +655,7 @@ risk_assessment_matrix = Skill(
     name="risk_assessment_matrix",
     description="Framework for assessing and prioritizing organizational risks.",
     category="compliance",
+    agent_ids=[AgentID.LEGAL, AgentID.EXEC, AgentID.STRAT],
     knowledge="""
 ## Risk Assessment Framework
 
@@ -701,6 +715,7 @@ blog_writing = Skill(
     name="blog_writing",
     description="Framework and best practices for creating engaging blog content.",
     category="content",
+    agent_ids=[AgentID.CONT],
     knowledge="""
 ## Blog Writing Framework
 
@@ -752,6 +767,7 @@ social_content = Skill(
     name="social_content",
     description="Templates and frameworks for creating engaging social media content.",
     category="content",
+    agent_ids=[AgentID.CONT, AgentID.MKT],
     knowledge="""
 ## Social Content Creation Framework
 
@@ -806,6 +822,7 @@ anomaly_detection = Skill(
     name="anomaly_detection",
     description="Techniques for identifying data anomalies and outliers.",
     category="data",
+    agent_ids=[AgentID.DATA, AgentID.OPS],
     knowledge="""
 ## Anomaly Detection Framework
 
@@ -847,6 +864,7 @@ trend_analysis = Skill(
     name="trend_analysis",
     description="Framework for identifying and analyzing data trends.",
     category="data",
+    agent_ids=[AgentID.DATA, AgentID.FIN, AgentID.STRAT],
     knowledge="""
 ## Trend Analysis Framework
 
@@ -900,6 +918,7 @@ ticket_sentiment_analysis = Skill(
     name="ticket_sentiment_analysis",
     description="Framework for analyzing customer sentiment in support tickets.",
     category="support",
+    agent_ids=[AgentID.SUPP],
     knowledge="""
 ## Ticket Sentiment Analysis Framework
 
@@ -953,6 +972,7 @@ churn_risk_indicators = Skill(
     name="churn_risk_indicators",
     description="Framework for identifying customers at risk of churning.",
     category="support",
+    agent_ids=[AgentID.SUPP, AgentID.SALES],
     knowledge="""
 ## Customer Churn Risk Framework
 
@@ -1005,6 +1025,7 @@ process_bottleneck_analysis = Skill(
     name="process_bottleneck_analysis",
     description="Framework for identifying and resolving process bottlenecks.",
     category="operations",
+    agent_ids=[AgentID.OPS],
     knowledge="""
 ## Process Bottleneck Analysis Framework
 
@@ -1058,6 +1079,7 @@ sop_generation = Skill(
     name="sop_generation",
     description="Template and guidelines for creating Standard Operating Procedures.",
     category="operations",
+    agent_ids=[AgentID.OPS, AgentID.HR],
     knowledge="""
 ## Standard Operating Procedure (SOP) Template
 
@@ -1165,6 +1187,7 @@ image_generation = Skill(
     name="image_generation",
     description="Generate images from text prompts using AI image generation.",
     category="content",
+    agent_ids=[AgentID.CONT],
     implementation=generate_image_stub,
 )
 
@@ -1172,6 +1195,7 @@ video_generation = Skill(
     name="video_generation",
     description="Generate short videos from text prompts using AI video generation.",
     category="content",
+    agent_ids=[AgentID.CONT],
     implementation=generate_video_stub,
 )
 
@@ -1224,3 +1248,7 @@ def register_all_skills() -> None:
 
 # Auto-register skills when module is imported
 register_all_skills()
+
+# Import external skills to register them as well
+# This adds 37 additional skills from external repositories
+import app.skills.external_skills  # noqa: F401, E402

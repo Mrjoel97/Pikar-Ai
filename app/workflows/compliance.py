@@ -20,17 +20,18 @@ This module implements 4 workflow agents for compliance management:
 39. PolicyReviewPipeline - Policy update and distribution
 40. VendorCompliancePipeline - Third-party compliance check
 
-Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
 from google.adk.agents import SequentialAgent, LoopAgent
 
 from app.agents.specialized_agents import (
-    strategic_agent,
-    financial_agent,
-    operations_agent,
-    hr_agent,
-    compliance_agent,
+    create_strategic_agent,
+    create_financial_agent,
+    create_operations_agent,
+    create_hr_agent,
+    create_compliance_agent,
 )
 
 
@@ -38,68 +39,89 @@ from app.agents.specialized_agents import (
 # 37. ComplianceAuditPipeline
 # =============================================================================
 
-_compliance_check = SequentialAgent(
-    name="ComplianceCheck",
-    description="Single iteration of compliance verification",
-    sub_agents=[compliance_agent, operations_agent],
-)
-
-ComplianceAuditPipeline = LoopAgent(
-    name="ComplianceAuditPipeline",
-    description="Iterative compliance verification until all criteria pass",
-    sub_agents=[_compliance_check],
-    max_iterations=5,
-)
+def create_compliance_audit_pipeline() -> LoopAgent:
+    """Create ComplianceAuditPipeline with fresh agent instances."""
+    compliance_check = SequentialAgent(
+        name="ComplianceCheck",
+        description="Single iteration of compliance verification",
+        sub_agents=[
+            create_compliance_agent(),
+            create_operations_agent(),
+        ],
+    )
+    return LoopAgent(
+        name="ComplianceAuditPipeline",
+        description="Iterative compliance verification until all criteria pass",
+        sub_agents=[compliance_check],
+        max_iterations=5,
+    )
 
 
 # =============================================================================
 # 38. RiskAssessmentPipeline
 # =============================================================================
 
-RiskAssessmentPipeline = SequentialAgent(
-    name="RiskAssessmentPipeline",
-    description="Business risk evaluation through compliance, financial, and strategic analysis",
-    sub_agents=[compliance_agent, financial_agent, strategic_agent],
-)
+def create_risk_assessment_pipeline() -> SequentialAgent:
+    """Create RiskAssessmentPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="RiskAssessmentPipeline",
+        description="Business risk evaluation through compliance, financial, and strategic analysis",
+        sub_agents=[
+            create_compliance_agent(),
+            create_financial_agent(),
+            create_strategic_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 39. PolicyReviewPipeline
 # =============================================================================
 
-PolicyReviewPipeline = SequentialAgent(
-    name="PolicyReviewPipeline",
-    description="Policy update and distribution through compliance and HR channels",
-    sub_agents=[compliance_agent, hr_agent],
-)
+def create_policy_review_pipeline() -> SequentialAgent:
+    """Create PolicyReviewPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="PolicyReviewPipeline",
+        description="Policy update and distribution through compliance and HR channels",
+        sub_agents=[
+            create_compliance_agent(),
+            create_hr_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 40. VendorCompliancePipeline
 # =============================================================================
 
-VendorCompliancePipeline = SequentialAgent(
-    name="VendorCompliancePipeline",
-    description="Third-party vendor compliance verification",
-    sub_agents=[compliance_agent, operations_agent, financial_agent],
-)
+def create_vendor_compliance_pipeline() -> SequentialAgent:
+    """Create VendorCompliancePipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="VendorCompliancePipeline",
+        description="Third-party vendor compliance verification",
+        sub_agents=[
+            create_compliance_agent(),
+            create_operations_agent(),
+            create_financial_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-COMPLIANCE_WORKFLOWS = [
-    ComplianceAuditPipeline,
-    RiskAssessmentPipeline,
-    PolicyReviewPipeline,
-    VendorCompliancePipeline,
-]
+COMPLIANCE_WORKFLOW_FACTORIES = {
+    "ComplianceAuditPipeline": create_compliance_audit_pipeline,
+    "RiskAssessmentPipeline": create_risk_assessment_pipeline,
+    "PolicyReviewPipeline": create_policy_review_pipeline,
+    "VendorCompliancePipeline": create_vendor_compliance_pipeline,
+}
 
 __all__ = [
-    "ComplianceAuditPipeline",
-    "RiskAssessmentPipeline",
-    "PolicyReviewPipeline",
-    "VendorCompliancePipeline",
-    "COMPLIANCE_WORKFLOWS",
+    "create_compliance_audit_pipeline",
+    "create_risk_assessment_pipeline",
+    "create_policy_review_pipeline",
+    "create_vendor_compliance_pipeline",
+    "COMPLIANCE_WORKFLOW_FACTORIES",
 ]

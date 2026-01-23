@@ -22,18 +22,21 @@ This module implements 5 workflow agents for product lifecycle:
 11. ProductIterationPipeline - Continuous product improvement
 
 Note: Executive Agent handles synthesis externally per Agent-Eco-System.md.
+
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
 from google.adk.agents import SequentialAgent, ParallelAgent, LoopAgent
 
 from app.agents.specialized_agents import (
-    strategic_agent,
-    content_agent,
-    data_agent,
-    financial_agent,
-    operations_agent,
-    marketing_agent,
-    sales_agent,
+    create_strategic_agent,
+    create_content_agent,
+    create_data_agent,
+    create_financial_agent,
+    create_operations_agent,
+    create_marketing_agent,
+    create_sales_agent,
 )
 
 
@@ -41,93 +44,120 @@ from app.agents.specialized_agents import (
 # 7. ProductIdeationPipeline
 # =============================================================================
 
-ProductIdeationPipeline = SequentialAgent(
-    name="ProductIdeationPipeline",
-    description="Market-informed product concept development through strategic, data, and content analysis",
-    sub_agents=[strategic_agent, data_agent, content_agent],
-)
+def create_product_ideation_pipeline() -> SequentialAgent:
+    """Create ProductIdeationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="ProductIdeationPipeline",
+        description="Market-informed product concept development through strategic, data, and content analysis",
+        sub_agents=[
+            create_strategic_agent(),
+            create_data_agent(),
+            create_content_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 8. ProductValidationPipeline (Consensus Pattern)
 # =============================================================================
 
-_product_validation_parallel = ParallelAgent(
-    name="ProductValidationConsensus",
-    description="Parallel ROI and viability analysis from financial, data, and strategic perspectives",
-    sub_agents=[financial_agent, data_agent, strategic_agent],
-)
-
-ProductValidationPipeline = SequentialAgent(
-    name="ProductValidationPipeline",
-    description="ROI and market viability assessment with multi-perspective consensus",
-    sub_agents=[_product_validation_parallel],
-)
+def create_product_validation_pipeline() -> SequentialAgent:
+    """Create ProductValidationPipeline with fresh agent instances."""
+    validation_parallel = ParallelAgent(
+        name="ProductValidationConsensus",
+        description="Parallel ROI and viability analysis from financial, data, and strategic perspectives",
+        sub_agents=[
+            create_financial_agent(),
+            create_data_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="ProductValidationPipeline",
+        description="ROI and market viability assessment with multi-perspective consensus",
+        sub_agents=[validation_parallel],
+    )
 
 
 # =============================================================================
 # 9. ServiceDesignPipeline
 # =============================================================================
 
-ServiceDesignPipeline = SequentialAgent(
-    name="ServiceDesignPipeline",
-    description="Service blueprint and pricing development",
-    sub_agents=[strategic_agent, operations_agent, financial_agent],
-)
+def create_service_design_pipeline() -> SequentialAgent:
+    """Create ServiceDesignPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="ServiceDesignPipeline",
+        description="Service blueprint and pricing development",
+        sub_agents=[
+            create_strategic_agent(),
+            create_operations_agent(),
+            create_financial_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 10. ProductLaunchPipeline
 # =============================================================================
 
-_product_launch_parallel = ParallelAgent(
-    name="ProductLaunchPrep",
-    description="Concurrent launch preparation across marketing, sales, and content",
-    sub_agents=[marketing_agent, sales_agent, content_agent],
-)
-
-ProductLaunchPipeline = SequentialAgent(
-    name="ProductLaunchPipeline",
-    description="Full product launch coordination with strategic planning and parallel execution",
-    sub_agents=[strategic_agent, _product_launch_parallel],
-)
+def create_product_launch_pipeline() -> SequentialAgent:
+    """Create ProductLaunchPipeline with fresh agent instances."""
+    launch_parallel = ParallelAgent(
+        name="ProductLaunchPrep",
+        description="Concurrent launch preparation across marketing, sales, and content",
+        sub_agents=[
+            create_marketing_agent(),
+            create_sales_agent(),
+            create_content_agent(),
+        ],
+    )
+    return SequentialAgent(
+        name="ProductLaunchPipeline",
+        description="Full product launch coordination with strategic planning and parallel execution",
+        sub_agents=[create_strategic_agent(), launch_parallel],
+    )
 
 
 # =============================================================================
 # 11. ProductIterationPipeline
 # =============================================================================
 
-_product_iteration_cycle = SequentialAgent(
-    name="ProductIterationCycle",
-    description="Single iteration of product improvement cycle",
-    sub_agents=[data_agent, content_agent, strategic_agent],
-)
-
-ProductIterationPipeline = LoopAgent(
-    name="ProductIterationPipeline",
-    description="Continuous product improvement based on feedback loops",
-    sub_agents=[_product_iteration_cycle],
-    max_iterations=5,
-)
+def create_product_iteration_pipeline() -> LoopAgent:
+    """Create ProductIterationPipeline with fresh agent instances."""
+    iteration_cycle = SequentialAgent(
+        name="ProductIterationCycle",
+        description="Single iteration of product improvement cycle",
+        sub_agents=[
+            create_data_agent(),
+            create_content_agent(),
+            create_strategic_agent(),
+        ],
+    )
+    return LoopAgent(
+        name="ProductIterationPipeline",
+        description="Continuous product improvement based on feedback loops",
+        sub_agents=[iteration_cycle],
+        max_iterations=5,
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-PRODUCT_WORKFLOWS = [
-    ProductIdeationPipeline,
-    ProductValidationPipeline,
-    ServiceDesignPipeline,
-    ProductLaunchPipeline,
-    ProductIterationPipeline,
-]
+PRODUCT_WORKFLOW_FACTORIES = {
+    "ProductIdeationPipeline": create_product_ideation_pipeline,
+    "ProductValidationPipeline": create_product_validation_pipeline,
+    "ServiceDesignPipeline": create_service_design_pipeline,
+    "ProductLaunchPipeline": create_product_launch_pipeline,
+    "ProductIterationPipeline": create_product_iteration_pipeline,
+}
 
 __all__ = [
-    "ProductIdeationPipeline",
-    "ProductValidationPipeline",
-    "ServiceDesignPipeline",
-    "ProductLaunchPipeline",
-    "ProductIterationPipeline",
-    "PRODUCT_WORKFLOWS",
+    "create_product_ideation_pipeline",
+    "create_product_validation_pipeline",
+    "create_service_design_pipeline",
+    "create_product_launch_pipeline",
+    "create_product_iteration_pipeline",
+    "PRODUCT_WORKFLOW_FACTORIES",
 ]

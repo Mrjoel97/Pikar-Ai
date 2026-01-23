@@ -1,23 +1,27 @@
 """CampaignService - CRUD operations for marketing campaigns.
 
 This service provides Create, Read, Update, Delete operations for campaigns
-stored in the campaigns table in Supabase. Used by MarketingAutomationAgent.
+stored in the campaigns table in Supabase with proper RLS authentication.
+Used by MarketingAutomationAgent.
 """
 
-import os
 from typing import Optional
-from supabase import create_client, Client
+from app.services.base_service import BaseService
 
 
-class CampaignService:
-    """Service for managing marketing campaigns."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+class CampaignService(BaseService):
+    """Service for managing marketing campaigns.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the campaign service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._table_name = "campaigns"
 
     async def create_campaign(

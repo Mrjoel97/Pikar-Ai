@@ -22,18 +22,21 @@ This module implements 7 workflow agents for sales lifecycle:
 16. DealQualificationPipeline - Smart deal routing
 17. OutreachSequencePipeline - Multi-touch outreach campaign
 18. CustomerJourneyPipeline - Full customer lifecycle mapping
+
+Architecture Note: Uses factory functions to create fresh agent instances for each
+workflow to avoid ADK's single-parent constraint.
 """
 
 from google.adk.agents import SequentialAgent, LoopAgent
 
 from app.agents.specialized_agents import (
-    strategic_agent,
-    content_agent,
-    data_agent,
-    financial_agent,
-    marketing_agent,
-    sales_agent,
-    customer_support_agent,
+    create_strategic_agent,
+    create_content_agent,
+    create_data_agent,
+    create_financial_agent,
+    create_marketing_agent,
+    create_sales_agent,
+    create_customer_support_agent,
 )
 
 
@@ -41,109 +44,149 @@ from app.agents.specialized_agents import (
 # 12. LeadGenerationPipeline
 # =============================================================================
 
-LeadGenerationPipeline = SequentialAgent(
-    name="LeadGenerationPipeline",
-    description="Generate and qualify leads through marketing, content, and data analysis",
-    sub_agents=[marketing_agent, content_agent, data_agent],
-)
+def create_lead_generation_pipeline() -> SequentialAgent:
+    """Create LeadGenerationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="LeadGenerationPipeline",
+        description="Generate and qualify leads through marketing, content, and data analysis",
+        sub_agents=[
+            create_marketing_agent(),
+            create_content_agent(),
+            create_data_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 13. LeadScoringPipeline
 # =============================================================================
 
-LeadScoringPipeline = SequentialAgent(
-    name="LeadScoringPipeline",
-    description="Score and prioritize leads based on data, sales, and financial analysis",
-    sub_agents=[data_agent, sales_agent, financial_agent],
-)
+def create_lead_scoring_pipeline() -> SequentialAgent:
+    """Create LeadScoringPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="LeadScoringPipeline",
+        description="Score and prioritize leads based on data, sales, and financial analysis",
+        sub_agents=[
+            create_data_agent(),
+            create_sales_agent(),
+            create_financial_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 14. LeadNurturingPipeline
 # =============================================================================
 
-_nurture_cycle = SequentialAgent(
-    name="NurtureCycle",
-    description="Single iteration of lead nurture sequence",
-    sub_agents=[content_agent, sales_agent, data_agent],
-)
-
-LeadNurturingPipeline = LoopAgent(
-    name="LeadNurturingPipeline",
-    description="Automated lead nurture sequence that loops until conversion",
-    sub_agents=[_nurture_cycle],
-    max_iterations=10,
-)
+def create_lead_nurturing_pipeline() -> LoopAgent:
+    """Create LeadNurturingPipeline with fresh agent instances."""
+    nurture_cycle = SequentialAgent(
+        name="NurtureCycle",
+        description="Single iteration of lead nurture sequence",
+        sub_agents=[
+            create_content_agent(),
+            create_sales_agent(),
+            create_data_agent(),
+        ],
+    )
+    return LoopAgent(
+        name="LeadNurturingPipeline",
+        description="Automated lead nurture sequence that loops until conversion",
+        sub_agents=[nurture_cycle],
+        max_iterations=10,
+    )
 
 
 # =============================================================================
 # 15. SalesFunnelCreationPipeline
 # =============================================================================
 
-SalesFunnelCreationPipeline = SequentialAgent(
-    name="SalesFunnelCreationPipeline",
-    description="Build complete sales funnel from strategy to execution",
-    sub_agents=[strategic_agent, marketing_agent, sales_agent, content_agent],
-)
+def create_sales_funnel_creation_pipeline() -> SequentialAgent:
+    """Create SalesFunnelCreationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="SalesFunnelCreationPipeline",
+        description="Build complete sales funnel from strategy to execution",
+        sub_agents=[
+            create_strategic_agent(),
+            create_marketing_agent(),
+            create_sales_agent(),
+            create_content_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 16. DealQualificationPipeline
 # =============================================================================
 
-# Note: Conditional routing would require custom BaseAgent or callback
-# For now, implemented as sequential with sales-first approach
-DealQualificationPipeline = SequentialAgent(
-    name="DealQualificationPipeline",
-    description="Smart deal routing through sales qualification and financial analysis",
-    sub_agents=[sales_agent, financial_agent],
-)
+def create_deal_qualification_pipeline() -> SequentialAgent:
+    """Create DealQualificationPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="DealQualificationPipeline",
+        description="Smart deal routing through sales qualification and financial analysis",
+        sub_agents=[
+            create_sales_agent(),
+            create_financial_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 17. OutreachSequencePipeline
 # =============================================================================
 
-OutreachSequencePipeline = SequentialAgent(
-    name="OutreachSequencePipeline",
-    description="Multi-touch outreach campaign through sales, content, and marketing",
-    sub_agents=[sales_agent, content_agent, marketing_agent],
-)
+def create_outreach_sequence_pipeline() -> SequentialAgent:
+    """Create OutreachSequencePipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="OutreachSequencePipeline",
+        description="Multi-touch outreach campaign through sales, content, and marketing",
+        sub_agents=[
+            create_sales_agent(),
+            create_content_agent(),
+            create_marketing_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # 18. CustomerJourneyPipeline
 # =============================================================================
 
-CustomerJourneyPipeline = SequentialAgent(
-    name="CustomerJourneyPipeline",
-    description="Full customer lifecycle mapping from data to support",
-    sub_agents=[data_agent, marketing_agent, sales_agent, customer_support_agent],
-)
+def create_customer_journey_pipeline() -> SequentialAgent:
+    """Create CustomerJourneyPipeline with fresh agent instances."""
+    return SequentialAgent(
+        name="CustomerJourneyPipeline",
+        description="Full customer lifecycle mapping from data to support",
+        sub_agents=[
+            create_data_agent(),
+            create_marketing_agent(),
+            create_sales_agent(),
+            create_customer_support_agent(),
+        ],
+    )
 
 
 # =============================================================================
 # Exports
 # =============================================================================
 
-SALES_WORKFLOWS = [
-    LeadGenerationPipeline,
-    LeadScoringPipeline,
-    LeadNurturingPipeline,
-    SalesFunnelCreationPipeline,
-    DealQualificationPipeline,
-    OutreachSequencePipeline,
-    CustomerJourneyPipeline,
-]
+SALES_WORKFLOW_FACTORIES = {
+    "LeadGenerationPipeline": create_lead_generation_pipeline,
+    "LeadScoringPipeline": create_lead_scoring_pipeline,
+    "LeadNurturingPipeline": create_lead_nurturing_pipeline,
+    "SalesFunnelCreationPipeline": create_sales_funnel_creation_pipeline,
+    "DealQualificationPipeline": create_deal_qualification_pipeline,
+    "OutreachSequencePipeline": create_outreach_sequence_pipeline,
+    "CustomerJourneyPipeline": create_customer_journey_pipeline,
+}
 
 __all__ = [
-    "LeadGenerationPipeline",
-    "LeadScoringPipeline",
-    "LeadNurturingPipeline",
-    "SalesFunnelCreationPipeline",
-    "DealQualificationPipeline",
-    "OutreachSequencePipeline",
-    "CustomerJourneyPipeline",
-    "SALES_WORKFLOWS",
+    "create_lead_generation_pipeline",
+    "create_lead_scoring_pipeline",
+    "create_lead_nurturing_pipeline",
+    "create_sales_funnel_creation_pipeline",
+    "create_deal_qualification_pipeline",
+    "create_outreach_sequence_pipeline",
+    "create_customer_journey_pipeline",
+    "SALES_WORKFLOW_FACTORIES",
 ]

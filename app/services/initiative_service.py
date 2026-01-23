@@ -1,23 +1,27 @@
 """InitiativeService - CRUD operations for strategic initiatives and OKRs.
 
 This service provides Create, Read, Update, Delete operations for initiatives
-stored in the initiatives table in Supabase. Used by StrategicPlanningAgent.
+stored in the initiatives table in Supabase with proper RLS authentication.
+Used by StrategicPlanningAgent.
 """
 
-import os
 from typing import Optional
-from supabase import create_client, Client
+from app.services.base_service import BaseService
 
 
-class InitiativeService:
-    """Service for managing initiatives and OKRs."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+class InitiativeService(BaseService):
+    """Service for managing initiatives and OKRs.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the initiative service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._table_name = "initiatives"
 
     async def create_initiative(

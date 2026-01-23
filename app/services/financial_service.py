@@ -1,15 +1,26 @@
+"""FinancialService - Financial data operations with proper RLS authentication.
 
-import os
-from datetime import datetime
-from supabase import create_client, Client
+This service handles financial data queries with user-scoped authentication.
+"""
 
-class FinancialService:
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if not url or not key:
-            raise ValueError("Supabase credentials missing")
-        self.client: Client = create_client(url, key)
+from typing import Optional
+from app.services.base_service import BaseService
+
+
+class FinancialService(BaseService):
+    """Service for financial data operations.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the financial service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
+        self._table_name = "financial_records"
 
     async def get_revenue_stats(self, period: str = "current_month") -> dict:
         """

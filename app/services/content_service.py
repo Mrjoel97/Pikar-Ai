@@ -1,25 +1,27 @@
 """ContentService - CRUD operations for content management.
 
 This service provides Create, Read, Update, Delete operations for content
-stored in the agent_knowledge table in Supabase.
+stored in the agent_knowledge table in Supabase with proper RLS authentication.
 """
 
-import os
 from typing import Optional
-from supabase import create_client, Client
+from app.services.base_service import BaseService
 from app.rag.knowledge_vault import ingest_document_content
 
 
-class ContentService:
-    """Service for managing content in the Knowledge Vault."""
-    
-    def __init__(self):
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if url and key:
-            self.client: Client = create_client(url, key)
-        else:
-            self.client = None
+class ContentService(BaseService):
+    """Service for managing content in the Knowledge Vault.
+
+    All queries are automatically scoped to the authenticated user via RLS.
+    """
+
+    def __init__(self, user_token: Optional[str] = None):
+        """Initialize the content service.
+
+        Args:
+            user_token: JWT token from the authenticated user.
+        """
+        super().__init__(user_token)
         self._table_name = "agent_knowledge"
 
     async def save_content(self, title: str, content: str, agent_id: str) -> dict:
