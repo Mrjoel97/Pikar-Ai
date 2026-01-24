@@ -42,10 +42,15 @@ class SupportTicketService(BaseService):
             "status": status,
             "assigned_to": assigned_to,
         }
+        # Force return of inserted data
         response = self.client.table(self._table_name).insert(data).execute()
-        if response.data:
+        # logger.info(f"Create Ticket Response: {response}")
+        if response.data and len(response.data) > 0:
             return response.data[0]
-        raise Exception("No data returned from insert ticket")
+        # Fallback if single object returned (unlikely with supabase-py but possible)
+        if response.data and isinstance(response.data, dict):
+            return response.data
+        raise Exception(f"No data returned from insert ticket. Response: {response}")
 
     async def get_ticket(self, ticket_id: str) -> dict:
         """Retrieve a ticket by ID."""
@@ -56,7 +61,10 @@ class SupportTicketService(BaseService):
             .single()
             .execute()
         )
-        return response.data
+        # .single() returns dict directly in .data usually
+        if response.data:
+            return response.data
+        raise Exception(f"Ticket {ticket_id} not found")
 
     async def update_ticket(
         self,
@@ -83,9 +91,9 @@ class SupportTicketService(BaseService):
             .eq("id", ticket_id)
             .execute()
         )
-        if response.data:
+        if response.data and len(response.data) > 0:
             return response.data[0]
-        raise Exception("No data returned from update ticket")
+        raise Exception(f"No data returned from update ticket {ticket_id}")
 
     async def list_tickets(
         self,
@@ -103,7 +111,7 @@ class SupportTicketService(BaseService):
             query = query.eq("assigned_to", assigned_to)
             
         response = query.order("created_at", desc=True).execute()
-        return response.data
+        return response.data or []
 
     async def delete_ticket(self, ticket_id: str) -> bool:
         """Delete a ticket."""
@@ -113,4 +121,7 @@ class SupportTicketService(BaseService):
             .eq("id", ticket_id)
             .execute()
         )
-        return len(response.data) > 0
+        # Check if any rows were deleted
+        if response.data and len(response.data) > 0:
+            return True
+        return False
