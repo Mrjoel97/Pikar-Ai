@@ -19,7 +19,8 @@ from contextlib import asynccontextmanager
 import google.auth
 from a2a.server.apps import A2AFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.tasks import InMemoryTaskStore
+# from a2a.server.tasks import InMemoryTaskStore  # Replaced
+from app.persistence.supabase_task_store import SupabaseTaskStore
 from a2a.types import AgentCapabilities, AgentCard
 from a2a.utils.constants import (
     AGENT_CARD_WELL_KNOWN_PATH,
@@ -57,7 +58,8 @@ runner = Runner(
 )
 
 request_handler = DefaultRequestHandler(
-    agent_executor=A2aAgentExecutor(runner=runner), task_store=InMemoryTaskStore()
+    agent_executor=A2aAgentExecutor(runner=runner), 
+    task_store=SupabaseTaskStore() # PERSISTENCE UPGRADE
 )
 
 A2A_RPC_PATH = f"/a2a/{adk_app.name}"
