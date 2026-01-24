@@ -7,8 +7,9 @@ Pikar AI leverages a modern and robust technology stack designed for scalability
 ## 2. Core Technologies
 
 ### Programming Languages
--   **Python:** Primary language for AI agent development, scripting, and existing FastAPI components.
--   **TypeScript (for Deno/Edge Functions):** Used for Supabase Edge Functions, providing a highly performant and secure backend for API logic.
+### Programming Languages
+-   **Python:** Primary language for the entire backend, including AI agents (`ExecutiveAgent`, `SpecializedAgents`), Service Layer (`app/services`), and API Server (`FastAPI`).
+-   **TypeScript:** Used for the Frontend (`React`) and optional Supabase Edge Function scripts if needed.
 
 ### AI/ML Framework & Models
 -   **Google ADK (Agent Development Kit):** The foundational framework for building, orchestrating, and deploying AI agents.
@@ -16,8 +17,9 @@ Pikar AI leverages a modern and robust technology stack designed for scalability
 -   **Google `text-embedding-004`:** Used for generating embeddings for the Knowledge Vault's RAG system, enabling semantic search capabilities.
 
 ### Backend Services
--   **Supabase Edge Functions (Deno/TypeScript):** The primary backend for implementing core business logic, APIs, and AI orchestration, leveraging Deno's performance and security.
--   **FastAPI/Uvicorn:** Utilized for the existing Python-based ADK agent component, providing a high-performance web framework.
+### Backend Services
+-   **FastAPI/Uvicorn:** The primary backend service implementing the Agent-to-Agent (A2A) protocol, business services (`app/services`), and orchestrating the AI agent ecosystem. Written in Python.
+-   **Supabase:** Provides the PostgreSQL database, Authentication, Realtime subscriptions, and Vector store. (Edge Functions are supported but secondary to the main FastAPI application).
 
 ### Database
 -   **PostgreSQL with `pgvector`:** The central database solution, integrated with Supabase, providing robust relational data storage and advanced vector indexing for efficient RAG operations.
