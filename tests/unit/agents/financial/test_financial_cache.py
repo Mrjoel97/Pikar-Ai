@@ -301,3 +301,106 @@ async def test_get_shopify_orders_hits_cache_on_repeat():
     assert r1["_cache_hit"] is False
     assert r2["_cache_hit"] is True
     assert call_count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_revenue_stats_returns_graph_claim_when_fresh():
+    """When a fresh revenue_trend claim exists, skip recompute and return it."""
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+    from uuid import uuid4
+
+    from app.agents.financial.tools import get_revenue_stats
+    from app.services.intelligence.schemas import (
+        CacheDecision,
+        Claim,
+        ClaimSource,
+    )
+
+    entity = uuid4()
+    fake_claim = Claim(
+        id=uuid4(),
+        entity_id=entity,
+        edge_id=None,
+        agent_id="financial",
+        claim_type="revenue_trend",
+        domain="financial",
+        finding_text="Revenue trended +12% MoM in Q1.",
+        confidence=0.82,
+        sources=[ClaimSource(kind="stripe_row", ref="agg/q1")],
+        contradicts=[],
+        freshness_at=datetime.now(timezone.utc),
+        expires_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+
+    with (
+        patch(
+            "app.agents.financial.tools.get_or_create_entity",
+            new=AsyncMock(return_value=entity),
+        ),
+        patch(
+            "app.agents.financial.tools.should_query_graph",
+            new=AsyncMock(
+                return_value=CacheDecision(
+                    tier="graph", verdict="fresh", freshness_hours=2.1,
+                )
+            ),
+        ),
+        patch(
+            "app.agents.financial.tools.find_claims",
+            new=AsyncMock(return_value=[fake_claim]),
+        ),
+    ):
+        result = await get_revenue_stats(period="current_month")
+
+    assert result["success"] is True
+    # When the graph short-circuits, surface the claim's narrative + confidence
+    assert "Revenue trended" in str(result.get("revenue_trend") or "")
+    assert result["confidence"] == pytest.approx(0.82, abs=1e-3)
+    assert result.get("_source") == "graph_cache"
+
+
+@pytest.mark.asyncio
+async def test_get_revenue_stats_falls_through_on_stale_or_miss():
+    """When verdict='stale' or 'miss', recompute via the existing path."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+
+    from app.agents.financial.tools import get_revenue_stats
+    from app.services.intelligence.schemas import CacheDecision
+
+    entity = uuid4()
+    fake_service = MagicMock()
+    fake_service.get_revenue_stats = AsyncMock(
+        return_value={
+            "revenue": 1000.0,
+            "currency": "USD",
+            "transaction_count": 10,
+            "source_breakdown": {"stripe": 10},
+        }
+    )
+
+    with (
+        patch(
+            "app.agents.financial.tools.get_or_create_entity",
+            new=AsyncMock(return_value=entity),
+        ),
+        patch(
+            "app.agents.financial.tools.should_query_graph",
+            new=AsyncMock(
+                return_value=CacheDecision(
+                    tier="graph", verdict="miss", freshness_hours=None,
+                )
+            ),
+        ),
+        patch(
+            "app.services.financial_service.FinancialService",
+            return_value=fake_service,
+        ),
+    ):
+        result = await get_revenue_stats(period="current_month")
+
+    assert result["success"] is True
+    assert result["revenue"] == 1000.0
+    assert result.get("_source") != "graph_cache"

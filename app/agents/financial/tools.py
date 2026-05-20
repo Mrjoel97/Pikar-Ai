@@ -25,7 +25,12 @@ from typing import Any
 
 from app.agents.runtime.operations_config import OperationsConfig
 from app.agents.runtime.tools_manifest import ToolsManifest
-from app.services.intelligence import to_band
+from app.services.intelligence import (
+    find_claims,
+    get_or_create_entity,
+    should_query_graph,
+    to_band,
+)
 from app.services.intelligence.presets import financial_confidence
 from app.services.supabase_async import execute_async
 
@@ -156,13 +161,56 @@ def _attach_confidence(
 
 
 async def get_revenue_stats(period: str = "current_month") -> dict:
-    """Get revenue statistics for financial analysis from FinancialService.
+    """Get revenue statistics for financial analysis.
 
-    Response now includes `confidence` (0.0-1.0) and `band`
-    ("low"|"medium"|"high") derived from data completeness, source authority,
-    and reconciliation signal. Forecast horizon is N/A for this tool
-    (historical aggregation -> horizon_certainty = 1.0).
+    Two-tier cache:
+    - Graph: if a `revenue_trend` claim exists for the period entity within
+      24 hours, return it without recomputing.
+    - Redis: when recomputation happens, the upstream Stripe fetch is
+      Redis-cached (TTL 300s) via Task 2.
+
+    Response carries `confidence` + `band` (Plan 114-01 wiring).
     """
+    # ---- Graph tier (24h freshness) ----
+    try:
+        entity_id = await get_or_create_entity(
+            canonical_name=f"financial_revenue_{period}",
+            entity_type="metric",
+            domains=["financial"],
+        )
+        decision = await should_query_graph(
+            entity_id=entity_id,
+            claim_type="revenue_trend",
+            agent_id="financial",
+            freshness_threshold_hours=24.0,
+        )
+        if decision.verdict == "fresh":
+            claims = await find_claims(
+                entity_id=entity_id,
+                claim_type="revenue_trend",
+                agent_id="financial",
+                limit=1,
+            )
+            if claims:
+                claim = claims[0]
+                return {
+                    "success": True,
+                    "period": period,
+                    "revenue_trend": claim.finding_text,
+                    "confidence": round(float(claim.confidence), 4),
+                    "band": claim.band,
+                    "_source": "graph_cache",
+                    "_graph_age_hours": decision.freshness_hours,
+                }
+    except Exception as e:
+        # Graph degrades silently -- keep going to the existing path.
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "get_revenue_stats graph tier skipped (%s)", e,
+        )
+
+    # ---- Fall through to existing FinancialService + Redis path ----
     from app.services.financial_service import FinancialService
 
     try:
