@@ -171,3 +171,71 @@ async def test_cached_external_call_swallows_cache_set_errors():
 
     assert payload == {"v": 1}
     assert hit is False  # we did go upstream
+
+
+@pytest.mark.asyncio
+async def test_get_stripe_revenue_summary_hits_cache_on_repeat():
+    """Second call within TTL returns the same payload without re-querying."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.agents.tools.stripe_tools import get_stripe_revenue_summary
+
+    fake_response = {
+        "total_revenue": 1000.0,
+        "transaction_count": 5,
+        "period": "current_month",
+        "avg_transaction_value": 200.0,
+        "currency": "USD",
+    }
+
+    call_count = {"n": 0}
+
+    async def fake_fetcher(**kwargs):
+        call_count["n"] += 1
+        return fake_response
+
+    # Simulate Redis fresh on the SECOND call. First call: miss; second: fresh.
+    from app.services.intelligence.schemas import CacheDecision
+
+    decisions = iter(
+        [
+            CacheDecision(tier="redis", verdict="miss", freshness_hours=None),
+            CacheDecision(tier="redis", verdict="fresh", freshness_hours=0.05),
+        ]
+    )
+
+    async def fake_decision(**kw):
+        return next(decisions)
+
+    with (
+        patch(
+            "app.agents.financial.cache.should_call_external",
+            new=fake_decision,
+        ),
+        patch(
+            "app.agents.financial.cache._cache_get",
+            new=AsyncMock(return_value=fake_response),
+        ),
+        patch(
+            "app.agents.financial.cache._cache_set",
+            new=AsyncMock(),
+        ),
+        patch(
+            "app.agents.tools.stripe_tools._fetch_stripe_revenue_summary_uncached",
+            side_effect=fake_fetcher,
+        ),
+        patch(
+            "app.agents.tools.stripe_tools._get_user_id",
+            return_value="user-abc",
+        ),
+    ):
+        r1 = await get_stripe_revenue_summary(period="current_month")
+        r2 = await get_stripe_revenue_summary(period="current_month")
+
+    # `_cache_hit` differs (False on miss, True on hit) -- compare payload bodies.
+    assert {k: v for k, v in r1.items() if k != "_cache_hit"} == {
+        k: v for k, v in r2.items() if k != "_cache_hit"
+    }
+    assert r1["_cache_hit"] is False
+    assert r2["_cache_hit"] is True
+    assert call_count["n"] == 1, "Second call should have hit Redis, not the fetcher"
