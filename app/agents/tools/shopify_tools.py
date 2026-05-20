@@ -51,11 +51,59 @@ def _resolve_period(period: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _get_user_shop_slug() -> str | None:
+    """Best-effort lookup of the user's connected Shopify shop slug.
+
+    Returns None if no connected shop is found; callers fall back to
+    'default' for cache-key composition.
+    """
+    from app.services.request_context import get_current_user_id
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return None
+    try:
+        from app.services.shopify_service import ShopifyService
+
+        svc = ShopifyService()
+        # ShopifyService exposes `get_connected_shop_slug` in current Phase 41+
+        # builds; if not present, falling back to None is acceptable.
+        getter = getattr(svc, "get_connected_shop_slug", None)
+        if getter is None:
+            return None
+        return getter(user_id=user_id)
+    except Exception:  # best-effort lookup
+        return None
+
+
+async def _fetch_shopify_orders_uncached(
+    *,
+    user_id: str,
+    period: str | None,
+    status: str | None,
+) -> dict[str, Any]:
+    """Raw Shopify orders fetch; only called on cache miss."""
+    from app.services.shopify_service import ShopifyService
+
+    svc = ShopifyService()
+    resolved_period = _resolve_period(period)
+    orders = await svc.get_orders(
+        user_id=user_id,
+        period=resolved_period,
+        status=status,
+    )
+    return {"orders": orders, "count": len(orders)}
+
+
 async def get_shopify_orders(
     period: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
-    """List Shopify orders with optional filters.
+    """List Shopify orders with optional filters, two-tier cached.
+
+    Cache: Redis tier, key=`shopify:orders:{period}:{shop}`, TTL 300s.
+    The cache is keyed by (period, shop), so multi-shop users get
+    independent cache entries.
 
     Optional filters: period ('last_7_days', 'last_30_days',
     'last_3_months'), status ('paid', 'pending', 'refunded').
@@ -65,24 +113,36 @@ async def get_shopify_orders(
         status: Financial status filter.
 
     Returns:
-        Dict with orders list and count.
+        Dict with orders list and count, plus an internal `_cache_hit`
+        boolean useful for load testing (not exposed to LLMs).
     """
     user_id = _get_user_id()
     if not user_id:
         return {"error": "Authentication required"}
 
-    from app.services.shopify_service import ShopifyService
+    from app.agents.financial.cache import (
+        SHOPIFY_ORDERS_TTL_S,
+        build_shopify_orders_key,
+        cached_external_call,
+    )
 
-    svc = ShopifyService()
+    period_key = period or "all_time"
+    shop = _get_user_shop_slug()
 
     try:
-        resolved_period = _resolve_period(period)
-        orders = await svc.get_orders(
-            user_id=user_id,
-            period=resolved_period,
-            status=status,
+        payload, cache_hit = await cached_external_call(
+            cache_key=build_shopify_orders_key(period_key, shop),
+            ttl_seconds=SHOPIFY_ORDERS_TTL_S,
+            fetcher=lambda: _fetch_shopify_orders_uncached(
+                user_id=user_id,
+                period=period,
+                status=status,
+            ),
+            metric_tag="shopify_orders",
         )
-        return {"orders": orders, "count": len(orders)}
+        payload = dict(payload)
+        payload["_cache_hit"] = cache_hit
+        return payload
     except Exception as exc:
         logger.exception("get_shopify_orders failed for user=%s", user_id)
         return {"error": f"Failed to retrieve Shopify orders: {exc}"}

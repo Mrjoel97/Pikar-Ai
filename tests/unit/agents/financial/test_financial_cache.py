@@ -239,3 +239,65 @@ async def test_get_stripe_revenue_summary_hits_cache_on_repeat():
     assert r1["_cache_hit"] is False
     assert r2["_cache_hit"] is True
     assert call_count["n"] == 1, "Second call should have hit Redis, not the fetcher"
+
+
+@pytest.mark.asyncio
+async def test_get_shopify_orders_hits_cache_on_repeat():
+    """Shopify orders cache: second call within TTL skips upstream."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.agents.tools.shopify_tools import get_shopify_orders
+    from app.services.intelligence.schemas import CacheDecision
+
+    fake_response = {"orders": [{"id": "o1"}], "count": 1}
+    call_count = {"n": 0}
+
+    async def fake_fetcher(**kwargs):
+        call_count["n"] += 1
+        return fake_response
+
+    decisions = iter(
+        [
+            CacheDecision(tier="redis", verdict="miss", freshness_hours=None),
+            CacheDecision(tier="redis", verdict="fresh", freshness_hours=0.05),
+        ]
+    )
+
+    async def fake_decision(**kw):
+        return next(decisions)
+
+    with (
+        patch(
+            "app.agents.financial.cache.should_call_external",
+            new=fake_decision,
+        ),
+        patch(
+            "app.agents.financial.cache._cache_get",
+            new=AsyncMock(return_value=fake_response),
+        ),
+        patch(
+            "app.agents.financial.cache._cache_set",
+            new=AsyncMock(),
+        ),
+        patch(
+            "app.agents.tools.shopify_tools._fetch_shopify_orders_uncached",
+            side_effect=fake_fetcher,
+        ),
+        patch(
+            "app.agents.tools.shopify_tools._get_user_id",
+            return_value="user-abc",
+        ),
+        patch(
+            "app.agents.tools.shopify_tools._get_user_shop_slug",
+            return_value="pikar-store",
+        ),
+    ):
+        r1 = await get_shopify_orders(period="last_30_days")
+        r2 = await get_shopify_orders(period="last_30_days")
+
+    r1_payload = {k: v for k, v in r1.items() if k != "_cache_hit"}
+    r2_payload = {k: v for k, v in r2.items() if k != "_cache_hit"}
+    assert r1_payload == r2_payload
+    assert r1["_cache_hit"] is False
+    assert r2["_cache_hit"] is True
+    assert call_count["n"] == 1
