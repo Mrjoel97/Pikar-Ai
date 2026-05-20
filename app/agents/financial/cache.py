@@ -101,10 +101,8 @@ async def _cache_get(cache_key: str) -> Any | None:
     try:
         cache = get_cache_service()
         value, _age_seconds = await cache.get_with_age(cache_key)
-    except (
-        Exception
-    ) as exc:  # pragma: no cover — defensive: get_with_age is itself defensive
-        logger.warning("financial cache: get failed for %s: %s", cache_key, exc)
+    except Exception as exc:  # pragma: no cover -- get_with_age is itself defensive
+        logger.debug("financial cache: get failed for %s: %s", cache_key, exc)
         return None
     return value
 
