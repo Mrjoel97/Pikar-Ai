@@ -7,7 +7,7 @@ Acceptance: >= 40% reduction in upstream Stripe fetcher calls when running
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +16,8 @@ pytestmark = [
     pytest.mark.slow,
     pytest.mark.skipif(
         not all(
-            os.environ.get(var) for var in ["REDIS_HOST", "REDIS_PORT"]
+            os.environ.get(var)
+            for var in ["REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD"]
         ),
         reason="Redis env not set",
     ),
@@ -31,8 +32,13 @@ async def test_stripe_call_rate_reduced_by_at_least_40_pct():
     from app.agents.tools.stripe_tools import get_stripe_revenue_summary
 
     periods = [
-        "current_month", "last_month", "last_3_months", "last_6_months",
-        "last_year", "all_time", "current_month",  # weight 'current_month' a bit higher
+        "current_month",
+        "last_month",
+        "last_3_months",
+        "last_6_months",
+        "last_year",
+        "all_time",
+        "current_month",  # weight 'current_month' a bit higher
     ]
 
     call_count = {"n": 0}
@@ -49,12 +55,15 @@ async def test_stripe_call_rate_reduced_by_at_least_40_pct():
 
     rng = random.Random(42)
 
-    with patch(
-        "app.agents.tools.stripe_tools._fetch_stripe_revenue_summary_uncached",
-        side_effect=fake_fetcher,
-    ), patch(
-        "app.agents.tools.stripe_tools._get_user_id",
-        return_value="user-load",
+    with (
+        patch(
+            "app.agents.tools.stripe_tools._fetch_stripe_revenue_summary_uncached",
+            side_effect=fake_fetcher,
+        ),
+        patch(
+            "app.agents.tools.stripe_tools._get_user_id",
+            return_value="user-load",
+        ),
     ):
         for _ in range(1000):
             await get_stripe_revenue_summary(period=rng.choice(periods))
