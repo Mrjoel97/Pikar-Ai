@@ -343,7 +343,9 @@ async def test_get_revenue_stats_returns_graph_claim_when_fresh():
             "app.agents.financial.tools.should_query_graph",
             new=AsyncMock(
                 return_value=CacheDecision(
-                    tier="graph", verdict="fresh", freshness_hours=2.1,
+                    tier="graph",
+                    verdict="fresh",
+                    freshness_hours=2.1,
                 )
             ),
         ),
@@ -352,7 +354,7 @@ async def test_get_revenue_stats_returns_graph_claim_when_fresh():
             new=AsyncMock(return_value=[fake_claim]),
         ),
     ):
-        result = await get_revenue_stats(period="current_month")
+        result = await get_revenue_stats(period="current_month", prefer_graph=True)
 
     assert result["success"] is True
     # When the graph short-circuits, surface the claim's narrative + confidence
@@ -390,7 +392,9 @@ async def test_get_revenue_stats_falls_through_on_stale_or_miss():
             "app.agents.financial.tools.should_query_graph",
             new=AsyncMock(
                 return_value=CacheDecision(
-                    tier="graph", verdict="miss", freshness_hours=None,
+                    tier="graph",
+                    verdict="miss",
+                    freshness_hours=None,
                 )
             ),
         ),
@@ -399,8 +403,58 @@ async def test_get_revenue_stats_falls_through_on_stale_or_miss():
             return_value=fake_service,
         ),
     ):
-        result = await get_revenue_stats(period="current_month")
+        result = await get_revenue_stats(period="current_month", prefer_graph=True)
 
     assert result["success"] is True
     assert result["revenue"] == 1000.0
     assert result.get("_source") != "graph_cache"
+
+
+@pytest.mark.asyncio
+async def test_get_revenue_stats_default_skips_graph_block():
+    """Without prefer_graph=True, no graph-tier calls happen even if claims exist."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.agents.financial.tools import get_revenue_stats
+
+    fake_service = MagicMock()
+    fake_service.get_revenue_stats = AsyncMock(
+        return_value={
+            "revenue": 500.0,
+            "currency": "USD",
+            "transaction_count": 5,
+            "source_breakdown": {"stripe": 5},
+        }
+    )
+
+    should_query = AsyncMock()
+    get_entity = AsyncMock()
+    find_cl = AsyncMock()
+
+    with (
+        patch(
+            "app.agents.financial.tools.should_query_graph",
+            new=should_query,
+        ),
+        patch(
+            "app.agents.financial.tools.get_or_create_entity",
+            new=get_entity,
+        ),
+        patch(
+            "app.agents.financial.tools.find_claims",
+            new=find_cl,
+        ),
+        patch(
+            "app.services.financial_service.FinancialService",
+            return_value=fake_service,
+        ),
+    ):
+        result = await get_revenue_stats(period="current_month")  # default
+
+    assert result["success"] is True
+    assert result["revenue"] == 500.0
+    assert result.get("_source") != "graph_cache"
+    # Critical: none of the graph helpers should have been called.
+    should_query.assert_not_called()
+    get_entity.assert_not_called()
+    find_cl.assert_not_called()

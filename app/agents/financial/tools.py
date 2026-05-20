@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -33,6 +34,8 @@ from app.services.intelligence import (
 )
 from app.services.intelligence.presets import financial_confidence
 from app.services.supabase_async import execute_async
+
+_logger = logging.getLogger(__name__)
 
 
 def _get_current_user_id() -> str | None:
@@ -160,57 +163,63 @@ def _attach_confidence(
     return result
 
 
-async def get_revenue_stats(period: str = "current_month") -> dict:
+async def get_revenue_stats(
+    period: str = "current_month",
+    prefer_graph: bool = False,
+) -> dict:
     """Get revenue statistics for financial analysis.
 
-    Two-tier cache:
-    - Graph: if a `revenue_trend` claim exists for the period entity within
-      24 hours, return it without recomputing.
-    - Redis: when recomputation happens, the upstream Stripe fetch is
-      Redis-cached (TTL 300s) via Task 2.
+    Args:
+        period: 'current_month', 'last_month', etc.
+        prefer_graph: When True, opportunistically short-circuit via a
+            fresh `revenue_trend` claim from kg_findings (24h freshness)
+            and return its narrative + confidence with `_source="graph_cache"`.
+            Default False -- always recompute via FinancialService (Redis-cached
+            upstream) so the response carries numeric `revenue`/`currency`.
+
+    Composite callers (e.g. get_financial_report, widget renderers) MUST NOT
+    pass prefer_graph=True because they rely on the numeric `revenue` and
+    `currency` keys, which the graph claim does not provide.
 
     Response carries `confidence` + `band` (Plan 114-01 wiring).
     """
-    # ---- Graph tier (24h freshness) ----
-    try:
-        entity_id = await get_or_create_entity(
-            canonical_name=f"financial_revenue_{period}",
-            entity_type="metric",
-            domains=["financial"],
-        )
-        decision = await should_query_graph(
-            entity_id=entity_id,
-            claim_type="revenue_trend",
-            agent_id="financial",
-            freshness_threshold_hours=24.0,
-        )
-        if decision.verdict == "fresh":
-            claims = await find_claims(
+    # ---- Graph tier (24h freshness) -- only when caller opts in ----
+    if prefer_graph:
+        try:
+            entity_id = await get_or_create_entity(
+                canonical_name=f"financial_revenue_{period}",
+                entity_type="metric",
+                domains=["financial"],
+            )
+            decision = await should_query_graph(
                 entity_id=entity_id,
                 claim_type="revenue_trend",
                 agent_id="financial",
-                limit=1,
+                freshness_threshold_hours=24.0,
             )
-            if claims:
-                claim = claims[0]
-                return {
-                    "success": True,
-                    "period": period,
-                    "revenue_trend": claim.finding_text,
-                    "confidence": round(float(claim.confidence), 4),
-                    "band": claim.band,
-                    "_source": "graph_cache",
-                    "_graph_age_hours": decision.freshness_hours,
-                }
-    except Exception as e:
-        # Graph degrades silently -- keep going to the existing path.
-        import logging as _logging
+            if decision.verdict == "fresh":
+                claims = await find_claims(
+                    entity_id=entity_id,
+                    claim_type="revenue_trend",
+                    agent_id="financial",
+                    limit=1,
+                )
+                if claims:
+                    claim = claims[0]
+                    return {
+                        "success": True,
+                        "period": period,
+                        "revenue_trend": claim.finding_text,
+                        "confidence": round(float(claim.confidence), 4),
+                        "band": claim.band,
+                        "_source": "graph_cache",
+                        "_graph_age_hours": decision.freshness_hours,
+                    }
+        except Exception as e:
+            # Graph degrades silently -- keep going to the existing path.
+            _logger.debug("get_revenue_stats graph tier skipped (%s)", e)
 
-        _logging.getLogger(__name__).debug(
-            "get_revenue_stats graph tier skipped (%s)", e,
-        )
-
-    # ---- Fall through to existing FinancialService + Redis path ----
+    # ---- FinancialService + Redis path (default + fall-through) ----
     from app.services.financial_service import FinancialService
 
     try:
