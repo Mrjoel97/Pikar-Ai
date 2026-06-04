@@ -7,12 +7,12 @@ Covers:
 - _execute_with_retry retries httpx.HTTPStatusError with status >= 500
 - _execute_with_retry does NOT retry httpx.HTTPStatusError with status < 500
 - _execute_with_retry still retries network-level errors (ConnectError, ReadTimeout)
-- Circuit breaker open state causes fast-fail with graceful degradation
+- Circuit breaker open state causes fast-fail without fabricating empty history
 """
 
 from __future__ import annotations
 
-import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -259,7 +259,7 @@ class TestExecuteWithRetry5xx:
 
 
 # ---------------------------------------------------------------------------
-# Circuit breaker open state — method-level graceful degradation
+# Circuit breaker open state — method-level fail-closed behaviour
 # ---------------------------------------------------------------------------
 
 
@@ -295,9 +295,9 @@ class TestCircuitBreakerOpenState:
         assert call_count == 0
 
     @pytest.mark.asyncio
-    async def test_get_session_returns_empty_when_cb_open(self):
-        """get_session should return an empty Session when circuit breaker is open."""
-        from google.adk.sessions import Session
+    async def test_get_session_raises_when_cb_open(self):
+        """get_session must not pretend missing DB history is an empty chat."""
+        from app.persistence.supabase_session_service import SessionLoadError
 
         svc = _make_session_service()
 
@@ -311,17 +311,12 @@ class TestCircuitBreakerOpenState:
             # _get_client is needed so mock it too
             svc._get_client = AsyncMock(return_value=MagicMock())
 
-            result = await svc.get_session(
-                app_name="test-app",
-                user_id="user-123",
-                session_id="session-abc",
-            )
-
-        assert result is not None
-        assert isinstance(result, Session)
-        assert result.id == "session-abc"
-        assert result.state == {}
-        assert result.events == []
+            with pytest.raises(SessionLoadError, match="temporarily unavailable"):
+                await svc.get_session(
+                    app_name="test-app",
+                    user_id="user-123",
+                    session_id="session-abc",
+                )
 
     @pytest.mark.asyncio
     async def test_create_session_raises_when_cb_open(self):
@@ -419,3 +414,70 @@ class TestCircuitBreakerOpenState:
             )
 
         assert result == []
+
+
+class TestSessionMetadataCacheScoping:
+    """Session metadata cache must never override owner-scoped DB reads."""
+
+    @pytest.mark.asyncio
+    async def test_get_session_uses_scoped_cached_metadata(self):
+        svc = _make_session_service()
+        svc._get_client = AsyncMock(return_value=MagicMock())
+        svc._cache.get_session_metadata = AsyncMock(
+            return_value=SimpleNamespace(
+                found=True,
+                value={
+                    "app_name": "test-app",
+                    "user_id": "user-123",
+                    "session_id": "session-abc",
+                    "state": {"from_cache": True},
+                },
+            )
+        )
+        svc._execute_with_retry = AsyncMock(return_value=MagicMock(data=[]))
+
+        result = await svc.get_session(
+            app_name="test-app",
+            user_id="user-123",
+            session_id="session-abc",
+        )
+
+        assert result is not None
+        assert result.state == {"from_cache": True}
+        assert svc._execute_with_retry.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_get_session_ignores_unscoped_cached_metadata(self):
+        svc = _make_session_service()
+        svc._get_client = AsyncMock(return_value=MagicMock())
+        svc._cache.get_session_metadata = AsyncMock(
+            return_value=SimpleNamespace(
+                found=True,
+                value={"state": {"stale": True}, "created_at": "now"},
+            )
+        )
+        svc._execute_with_retry = AsyncMock(
+            side_effect=[
+                MagicMock(
+                    data=[
+                        {
+                            "app_name": "test-app",
+                            "user_id": "user-123",
+                            "session_id": "session-abc",
+                            "state": {"fresh": True},
+                        }
+                    ]
+                ),
+                MagicMock(data=[]),
+            ]
+        )
+
+        result = await svc.get_session(
+            app_name="test-app",
+            user_id="user-123",
+            session_id="session-abc",
+        )
+
+        assert result is not None
+        assert result.state == {"fresh": True}
+        assert svc._execute_with_retry.await_count == 2

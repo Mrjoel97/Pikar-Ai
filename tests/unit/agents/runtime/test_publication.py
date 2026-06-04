@@ -170,7 +170,10 @@ async def test_render_report_markdown_contains_all_required_sections() -> None:
     )
 
     for required in (
+        "## Executive Snapshot",
         "## Goal",
+        "## Target Outcome",
+        "## Core Workstreams",
         "## To-Do Outcomes",
         "## Success Criteria",
         "## Research Summary",
@@ -179,9 +182,13 @@ async def test_render_report_markdown_contains_all_required_sections() -> None:
         "## Artifacts",
         "## Audit Report",
         "## Policy Notes",
+        "## Action Plan",
         "## Follow-ups",
     ):
         assert required in md, f"missing section: {required}"
+    assert "**Prepared by:** FIN" in md
+    assert "**Sources reviewed:** 1" in md
+    assert "**Artifacts produced:** 1" in md
     assert "Forecast Q3 revenue" in md
     assert "Pull historicals" in md
     assert "Build model" in md
@@ -223,6 +230,7 @@ async def test_render_report_markdown_renders_audit_per_criterion() -> None:
     assert "off by 12%" in md
     assert "tool_denied" in md
     assert "accuracy gap" in md  # surfaced as a follow-up
+    assert "| Audit gap: accuracy gap | Audit | High |" in md
     assert "_no artifacts produced_" in md
 
 

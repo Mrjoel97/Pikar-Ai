@@ -68,6 +68,44 @@ from app.services.supabase_resilience import supabase_circuit_breaker
 logger = logging.getLogger(__name__)
 
 
+class SessionLoadError(RuntimeError):
+    """Raised when persisted session history cannot be loaded reliably."""
+
+    def __init__(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        session_id: str,
+        cause: Exception,
+    ) -> None:
+        super().__init__(
+            "Session history is temporarily unavailable; refusing to continue "
+            f"without persisted context for session {session_id}"
+        )
+        self.app_name = app_name
+        self.user_id = user_id
+        self.session_id = session_id
+        self.cause = cause
+
+
+def _cached_session_metadata_matches(
+    metadata: Any,
+    *,
+    app_name: str,
+    user_id: str,
+    session_id: str,
+) -> bool:
+    """Return True only for cache rows scoped to this exact session owner."""
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get("app_name") == app_name
+        and metadata.get("user_id") == user_id
+        and metadata.get("session_id") == session_id
+    )
+
+
 def _truncate_string_for_context(
     value: str, max_len: int = _MAX_STRING_LEN_IN_CONTEXT
 ) -> str:
@@ -354,7 +392,14 @@ class SupabaseSessionService(BaseSessionService):
 
             # Cache the new session metadata
             await self._cache.set_session_metadata(
-                session_id, {"state": state or {}, "created_at": "now"}
+                session_id,
+                {
+                    "app_name": app_name,
+                    "user_id": user_id_str,
+                    "session_id": session_id,
+                    "state": state or {},
+                    "created_at": "now",
+                },
             )
 
             return Session(
@@ -385,17 +430,32 @@ class SupabaseSessionService(BaseSessionService):
         Returns:
             Session object if found, None otherwise.
         """
+        user_id_str = self._ensure_uuid_str(user_id)
         try:
             client = await self._get_client()
             # Get session metadata
-            user_id_str = self._ensure_uuid_str(user_id)
             # Try cache for session metadata first
             cached_meta = await self._cache.get_session_metadata(session_id)
             session_data = None
 
-            if cached_meta and cached_meta.found:
+            if (
+                cached_meta
+                and cached_meta.found
+                and _cached_session_metadata_matches(
+                    cached_meta.value,
+                    app_name=app_name,
+                    user_id=user_id_str,
+                    session_id=session_id,
+                )
+            ):
                 session_data = cached_meta.value
-            else:
+            elif cached_meta and cached_meta.found:
+                logger.warning(
+                    "Ignoring unscoped or mismatched cached session metadata for %s",
+                    session_id,
+                )
+
+            if session_data is None:
                 session_response = await self._execute_with_retry(
                     client.table(self.sessions_table)
                     .select("*")
@@ -498,14 +558,20 @@ class SupabaseSessionService(BaseSessionService):
                 events=events,
             )
         except Exception as e:
-            logger.warning(f"Failed to get session {session_id}: {e}")
-            return Session(
-                app_name=app_name,
-                user_id=user_id_str if "user_id_str" in locals() else str(user_id),
-                id=session_id,
-                state={},
-                events=[],
+            logger.error(
+                "Failed to load persisted session %s for user %s; refusing to "
+                "continue with empty history: %s",
+                session_id,
+                user_id_str,
+                e,
+                exc_info=True,
             )
+            raise SessionLoadError(
+                app_name=app_name,
+                user_id=user_id_str,
+                session_id=session_id,
+                cause=e,
+            ) from e
 
     async def _build_summary_event(
         self,

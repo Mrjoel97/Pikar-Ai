@@ -17,6 +17,7 @@ import {
   markPendingChatSession,
 } from '@/lib/pendingChatSessions';
 import {
+  clearFreshClientSession,
   isFreshClientSession,
   markFreshClientSession,
 } from '@/lib/freshClientSessions';
@@ -57,9 +58,13 @@ export type SessionEvent = {
   app_name: string;
   user_id: string;
   session_id: string;
-  event_data: any;
+  event_data: unknown;
   event_index: number;
   created_at: string;
+};
+
+type WidgetWithOptionalId = {
+  id?: string;
 };
 
 /**
@@ -171,6 +176,7 @@ export function useAgentChat(
   const selectChatRef = useRef(selectChat);
   const sessionsRef = useRef(sessions);
   const agentDisplayNameRef = useRef(agentDisplayName);
+  const visibleSessionIdRef = useRef(visibleSessionId);
   // Stable ref that mirrors activeSessions so effects that only need to READ
   // the map (history loading, welcome-message check) can do so without listing
   // activeSessions itself as a dependency — preventing unrelated session-map
@@ -196,6 +202,10 @@ export function useAgentChat(
   useEffect(() => {
     agentDisplayNameRef.current = agentDisplayName;
   }, [agentDisplayName]);
+
+  useEffect(() => {
+    visibleSessionIdRef.current = visibleSessionId;
+  }, [visibleSessionId]);
 
   useEffect(() => {
     activeSessionsRef.current = activeSessions;
@@ -229,9 +239,10 @@ export function useAgentChat(
     }
   }, [visibleSessionId, currentSessionId, selectChat, sessionRestored, usesFallbackSessionId]);
 
-  // --- Message queue for sends during streaming ---
-  const isStreamingRef = useRef(false);
-  const messageQueueRef = useRef<{ content: string; agentMode: AgentMode; userMsgId: string }[]>([]);
+  // --- Message queues for sends during streaming ---
+  const messageQueueRef = useRef<
+    Map<string, { content: string; agentMode: AgentMode; userMsgId: string }[]>
+  >(new Map());
 
   // --- History loading state ---
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -249,11 +260,6 @@ export function useAgentChat(
   }, [activeSession?.messages, agentDisplayName]);
 
   const isStreaming = activeSession?.status === 'streaming';
-
-  // Keep the isStreamingRef in sync with derived state
-  useEffect(() => {
-    isStreamingRef.current = isStreaming;
-  }, [isStreaming]);
 
   // --- Ensure session exists in the map ---
   // When the session is not yet in activeSessions (e.g. fresh load), add it
@@ -483,7 +489,7 @@ export function useAgentChat(
               widget,
             );
             if (saved) {
-              (widget as any).id = saved.id;
+              (widget as WidgetWithOptionalId).id = saved.id;
             }
           }
         });
@@ -510,9 +516,9 @@ export function useAgentChat(
         prevArr.forEach((prev, idx) => {
           if (idx < currentWidgetMsgs.length && prev.isMinimized) {
             currentWidgetMsgs[idx].isMinimized = prev.isMinimized;
-            const widgetAny = currentWidgetMsgs[idx].widget as any;
-            if (widgetAny?.id) {
-              service.updateWidgetState(user.id, widgetAny.id, { isMinimized: prev.isMinimized });
+            const widgetWithId = currentWidgetMsgs[idx].widget as WidgetWithOptionalId | undefined;
+            if (widgetWithId?.id) {
+              service.updateWidgetState(user.id, widgetWithId.id, { isMinimized: prev.isMinimized });
             }
           }
         });
@@ -557,21 +563,22 @@ export function useAgentChat(
   // executeSend — delegates to startStream from useBackgroundStream
   // ---------------------------------------------------------------------------
 
-  const executeSend = useCallback(async (content: string, agentMode: AgentMode, userMsgId: string) => {
+  const executeSend = useCallback(async (targetSessionId: string, content: string, agentMode: AgentMode, userMsgId: string) => {
     // Un-queue the user message
-    const session = getLatestSession(currentSessionId);
+    const session = getLatestSession(targetSessionId);
     if (session) {
       const updatedMessages = session.messages.map(m =>
         m.id === userMsgId ? { ...m, isQueued: false } : m
       );
-      updateSessionState(currentSessionId, { messages: updatedMessages });
+      updateSessionState(targetSessionId, { messages: updatedMessages });
     }
 
-    clearPendingChatSession(currentSessionId);
+    clearPendingChatSession(targetSessionId);
+    clearFreshClientSession(targetSessionId);
 
     // Fire onSessionStarted callback for brand-new sessions
     if (isNewSessionRef.current && onSessionStartedRef.current) {
-      onSessionStartedRef.current(currentSessionId, content);
+      onSessionStartedRef.current(targetSessionId, content);
       isNewSessionRef.current = false;
     }
 
@@ -580,7 +587,7 @@ export function useAgentChat(
 
     // Start the background stream
     await startStream({
-      sessionId: currentSessionId,
+      sessionId: targetSessionId,
       message: content,
       agentMode,
       agentDisplayName,
@@ -591,7 +598,7 @@ export function useAgentChat(
         }
 
         // Show toast notification for background sessions
-        if (sid !== currentSessionId) {
+        if (sid !== visibleSessionIdRef.current) {
           const sessionMeta = sessionsRef.current.find((s) => s.id === sid);
           const title = sessionMeta?.title || `Session ${sid.slice(0, 8)}`;
           showSessionReadyToast(sid, title, (targetId) => {
@@ -610,33 +617,38 @@ export function useAgentChat(
         }
 
         // Process the message queue
-        if (messageQueueRef.current.length > 0) {
-          const nextMsg = messageQueueRef.current.shift();
-          if (nextMsg) {
-            setTimeout(() => {
-              executeSend(nextMsg.content, nextMsg.agentMode, nextMsg.userMsgId);
-            }, 0);
-          }
+        const queue = messageQueueRef.current.get(sid) ?? [];
+        const nextMsg = queue.shift();
+        if (queue.length === 0) {
+          messageQueueRef.current.delete(sid);
+        } else {
+          messageQueueRef.current.set(sid, queue);
+        }
+        if (nextMsg) {
+          setTimeout(() => {
+            executeSend(sid, nextMsg.content, nextMsg.agentMode, nextMsg.userMsgId);
+          }, 0);
         }
       },
       onStreamError: (sid, _errorText) => {
         // On error, clear queued messages' isQueued flags
-        if (messageQueueRef.current.length > 0) {
+        const queue = messageQueueRef.current.get(sid) ?? [];
+        if (queue.length > 0) {
           const sessionNow = getLatestSession(sid);
           if (sessionNow) {
             const msgs = sessionNow.messages.map(m => {
-              if (messageQueueRef.current.some(q => q.userMsgId === m.id)) {
+              if (queue.some(q => q.userMsgId === m.id)) {
                 return { ...m, isQueued: false };
               }
               return m;
             });
             updateSessionState(sid, { messages: msgs });
           }
-          messageQueueRef.current = [];
+          messageQueueRef.current.delete(sid);
         }
       },
     });
-  }, [currentSessionId, getLatestSession, updateSessionState, enforceCapBeforeStream, startStream, agentDisplayName]);
+  }, [getLatestSession, updateSessionState, enforceCapBeforeStream, startStream, agentDisplayName]);
 
   // ---------------------------------------------------------------------------
   // sendMessage — public API
@@ -645,18 +657,20 @@ export function useAgentChat(
   const sendMessage = useCallback((content: string, agentMode: AgentMode = 'auto') => {
     if (!content.trim()) return;
 
+    const targetSessionId = currentSessionId;
+    const session = getLatestSession(targetSessionId);
+    const targetIsStreaming = session?.status === 'streaming';
     const userMsgId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const userMsg: Message = { id: userMsgId, role: 'user', text: content, isQueued: isStreamingRef.current };
+    const userMsg: Message = { id: userMsgId, role: 'user', text: content, isQueued: targetIsStreaming };
 
     // Append user message to session map
-    const session = getLatestSession(currentSessionId);
     if (session) {
-      updateSessionState(currentSessionId, {
+      updateSessionState(targetSessionId, {
         messages: [...session.messages, userMsg],
       });
     } else {
       try {
-        selectChat(currentSessionId);
+        selectChat(targetSessionId);
       } catch (err) {
         if (err instanceof TabCapReachedError) {
           toast.error(
@@ -666,24 +680,26 @@ export function useAgentChat(
         }
         throw err;
       }
-      addActiveSession(currentSessionId, {
+      addActiveSession(targetSessionId, {
         messages: [...[makeWelcomeMessage(agentDisplayName)], userMsg],
       });
     }
 
-    if (isStreamingRef.current) {
-      messageQueueRef.current.push({ content, agentMode, userMsgId });
+    if (targetIsStreaming) {
+      const queue = messageQueueRef.current.get(targetSessionId) ?? [];
+      queue.push({ content, agentMode, userMsgId });
+      messageQueueRef.current.set(targetSessionId, queue);
       return;
     }
 
     if (session) {
-      executeSend(content, agentMode, userMsgId);
+      executeSend(targetSessionId, content, agentMode, userMsgId);
       return;
     }
 
     // Give the session map a tick to materialize the new session ref before streaming.
     setTimeout(() => {
-      executeSend(content, agentMode, userMsgId);
+      executeSend(targetSessionId, content, agentMode, userMsgId);
     }, 0);
   }, [currentSessionId, getLatestSession, updateSessionState, addActiveSession, executeSend, agentDisplayName, selectChat]);
 
@@ -720,8 +736,8 @@ export function useAgentChat(
       updateSessionState(currentSessionId, { messages: msgs });
 
       // Persist widget state
-      const widgetAny = msgs[messageIndex]?.widget as any;
-      const widgetId = widgetAny?.id;
+      const widgetWithId = msgs[messageIndex]?.widget as WidgetWithOptionalId | undefined;
+      const widgetId = widgetWithId?.id;
       if (widgetId) {
         (async () => {
           const { data } = await supabase.auth.getUser();
@@ -747,9 +763,9 @@ export function useAgentChat(
     if (msg.widget.type === 'image' || msg.widget.type === 'video' || msg.widget.type === 'video_spec') return;
     const { data } = await supabase.auth.getUser();
     if (data.user) {
-      const widgetAny = msg.widget as any;
-      if (widgetAny.id) {
-        widgetServiceRef.current.pinWidget(widgetAny.id, data.user.id);
+      const widgetWithId = msg.widget as WidgetWithOptionalId;
+      if (widgetWithId.id) {
+        widgetServiceRef.current.pinWidget(widgetWithId.id, data.user.id);
       } else {
         widgetServiceRef.current.saveWidget(data.user.id, currentSessionId, msg.widget, true);
       }
@@ -785,7 +801,7 @@ export function useAgentChat(
       updateSessionState(currentSessionId, { messages: msgs, status: 'idle' });
     }
 
-    messageQueueRef.current = [];
+    messageQueueRef.current.delete(currentSessionId);
   }, [currentSessionId, getLatestSession, updateSessionState, stopStream]);
 
   // ---------------------------------------------------------------------------

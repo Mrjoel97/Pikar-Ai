@@ -14,11 +14,19 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { backendFetch } from '@/lib/backendProxy'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+function resolveBackendUrl(): string {
+    return (
+        process.env.BACKEND_PUBLIC_HOST
+        || process.env.NEXT_PUBLIC_API_URL
+        || process.env.BACKEND_URL
+        || 'http://localhost:8000'
+    ).replace(/\/+$/, '')
+}
 
 export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
@@ -39,8 +47,8 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'no access token' }, { status: 401 })
         }
 
-        const url = `${BACKEND_URL}/sessions?limit=${limit}`
-        const upstream = await fetch(url, {
+        const url = `${resolveBackendUrl()}/sessions?limit=${limit}`
+        const upstream = await backendFetch(url, {
             headers: { Authorization: `Bearer ${accessToken}` },
             cache: 'no-store',
         })

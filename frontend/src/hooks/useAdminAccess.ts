@@ -4,7 +4,7 @@
 /**
  * @fileoverview Detects whether the current user has admin role access.
  *
- * Calls GET /admin/check-access once on mount and caches the result in
+ * Calls GET /api/admin/check-access once on mount and caches the result in
  * sessionStorage so the sidebar can show an "Admin Panel" entry without
  * re-fetching on every page navigation. Admin status is role-gated server
  * side (see app/admin/layout.tsx), not tier-gated, so it lives outside
@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { fetchWithAuthRaw } from '@/services/api';
+import { getAccessToken } from '@/lib/supabase/client';
 
 const STORAGE_KEY = 'pikar:admin-access';
 
@@ -64,7 +64,11 @@ export function useAdminAccess(): AdminAccessResult {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetchWithAuthRaw('/admin/check-access');
+        const token = await getAccessToken().catch(() => null);
+        const res = await fetch('/api/admin/check-access', {
+          cache: 'no-store',
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
         if (cancelled) {
           return;
         }

@@ -83,7 +83,11 @@ export async function loadSessionHistory(
 
   if (error) {
     console.error('[sessionHistory] Failed to query session_events:', error);
-    return [];
+    const message =
+      typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message)
+        : 'Unknown Supabase error';
+    throw new Error(`Failed to load session history: ${message}`);
   }
 
   if (!events || events.length === 0) {

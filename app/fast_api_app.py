@@ -1226,6 +1226,29 @@ _inject_synthetic_text_for_widget = inject_synthetic_text_for_widget
 _inject_synthetic_text_for_tool_message = inject_synthetic_text_for_tool_message
 
 
+def _is_session_load_error(exc: Exception) -> bool:
+    """Return True for fail-closed session history load failures."""
+    try:
+        from app.persistence.supabase_session_service import SessionLoadError
+
+        return isinstance(exc, SessionLoadError)
+    except Exception:
+        return False
+
+
+def _session_unavailable_event() -> str:
+    return json.dumps(
+        {
+            "error": (
+                "Your chat history is temporarily unavailable, so I stopped "
+                "before answering without prior context. Please retry in a moment."
+            ),
+            "error_code": "session_unavailable",
+            "retryable": True,
+        }
+    )
+
+
 # SSE Request Models
 class TextPart(BaseModel):
     text: str
@@ -1668,6 +1691,8 @@ async def run_sse(raw_request: Request, request: ChatRequest):
                                 {"error": user_msg, "error_code": "quota_exhausted"}
                             )
                         )
+                    elif _is_session_load_error(e):
+                        await adk_event_queue.put(_session_unavailable_event())
                     else:
                         await adk_event_queue.put(json.dumps({"error": str(e)}))
                 finally:
@@ -1748,8 +1773,14 @@ async def run_sse(raw_request: Request, request: ChatRequest):
                             elif isinstance(current_state, dict):
                                 current_state.update(state_updates)
                 except Exception as e:
-                    logger.warning(f"Session check/creation failed: {e}")
-                    # Continue anyway - the runner might handle this
+                    logger.error(
+                        "Session check/creation failed; refusing to run agent "
+                        "without reliable persisted context: %s",
+                        e,
+                        exc_info=True,
+                    )
+                    yield f"data: {_session_unavailable_event()}\n\n"
+                    return
 
                 yield ": setup\n\n"
 

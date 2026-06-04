@@ -36,8 +36,21 @@ export interface SSEAccumulator {
 }
 
 export interface ParsedSideEffect {
-  type: 'save_widget' | 'focus_widget' | 'workspace_activity' | 'error_activity';
+  type: 'save_widget' | 'focus_widget' | 'workspace_activity' | 'error_activity' | 'long_task';
   payload: unknown;
+}
+
+export interface LongTaskEvent {
+  eventType: 'long_task_started' | 'long_task_progress' | 'long_task_completed';
+  jobId: string;
+  kind?: string;
+  status?: string;
+  progressPct?: number | null;
+  message?: string | null;
+  pollUrl?: string | null;
+  estimatedDurationS?: number | null;
+  result?: unknown;
+  error?: string | null;
 }
 
 /** Result of parsing a single SSE event. */
@@ -78,6 +91,12 @@ const DIRECTOR_STAGE_LABELS: Record<string, string> = {
   completed: 'Video completed',
   failed: 'Video generation failed',
 };
+
+const LONG_TASK_EVENT_TYPES = new Set([
+  'long_task_started',
+  'long_task_progress',
+  'long_task_completed',
+]);
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -124,6 +143,55 @@ function extractWidgetCandidate(payload: unknown): Record<string, unknown> | nul
   }
 
   return null
+}
+
+function toLongTaskEvent(data: Record<string, unknown>): LongTaskEvent | null {
+  const eventType = typeof data.event_type === 'string' ? data.event_type : '';
+  if (!LONG_TASK_EVENT_TYPES.has(eventType)) return null;
+
+  const jobId = typeof data.job_id === 'string' ? data.job_id : '';
+  if (!jobId) return null;
+
+  const progressPct =
+    typeof data.progress_pct === 'number' && Number.isFinite(data.progress_pct)
+      ? data.progress_pct
+      : null;
+  const estimatedDurationS =
+    typeof data.estimated_duration_s === 'number' && Number.isFinite(data.estimated_duration_s)
+      ? data.estimated_duration_s
+      : null;
+
+  return {
+    eventType: eventType as LongTaskEvent['eventType'],
+    jobId,
+    kind: typeof data.kind === 'string' ? data.kind : undefined,
+    status: typeof data.status === 'string' ? data.status : undefined,
+    progressPct,
+    message: typeof data.message === 'string' ? data.message : null,
+    pollUrl: typeof data.poll_url === 'string' ? data.poll_url : null,
+    estimatedDurationS,
+    result: data.result,
+    error: typeof data.error === 'string' ? data.error : null,
+  };
+}
+
+function describeLongTask(event: LongTaskEvent): string {
+  const kind = event.kind || 'background task';
+  if (event.eventType === 'long_task_started') {
+    const eta =
+      typeof event.estimatedDurationS === 'number'
+        ? ` (~${Math.max(1, Math.round(event.estimatedDurationS / 60))} min)`
+        : '';
+    return `Started ${kind}${eta}`;
+  }
+  if (event.eventType === 'long_task_completed') {
+    return event.error ? `Failed: ${event.error}` : `Completed ${kind}`;
+  }
+  const pct =
+    typeof event.progressPct === 'number'
+      ? ` ${Math.max(0, Math.min(100, Math.round(event.progressPct)))}%`
+      : '';
+  return event.message || `Running ${kind}${pct}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +245,50 @@ export function parseSSEEvent(
     const iid = typeof data.interaction_id === 'string' ? data.interaction_id : null;
     accumulator.interactionId = iid;
     result.interactionId = iid;
+    return result;
+  }
+
+  // ------- Long-running job handoff / polling progress -------
+  const longTaskEvent = toLongTaskEvent(data);
+  if (longTaskEvent) {
+    const traceContent = describeLongTask(longTaskEvent);
+    const dedupeKey = `long_task:${longTaskEvent.jobId}:${longTaskEvent.eventType}:${longTaskEvent.status ?? ''}:${longTaskEvent.progressPct ?? ''}:${traceContent}`;
+
+    if (!accumulator.seenProgressStages.has(dedupeKey)) {
+      accumulator.seenProgressStages.add(dedupeKey);
+      accumulator.currentTraces.push({
+        type:
+          longTaskEvent.eventType === 'long_task_completed'
+            ? 'tool_output'
+            : 'tool_use',
+        toolName: longTaskEvent.kind || 'Background task',
+        content: traceContent,
+      });
+      result.traces = [...accumulator.currentTraces];
+    }
+
+    if (longTaskEvent.eventType === 'long_task_completed' && !longTaskEvent.error) {
+      const candidate = extractWidgetCandidate(longTaskEvent.result);
+      if (candidate) {
+        accumulator.currentWidget = candidate;
+        result.widgetFound = candidate;
+        result.sideEffects.push({
+          type: 'save_widget',
+          payload: candidate,
+        });
+        result.sideEffects.push({
+          type: 'focus_widget',
+          payload: candidate,
+        });
+      }
+    }
+
+    result.sideEffects.push({
+      type: 'long_task',
+      payload: longTaskEvent,
+    });
+    accumulator.isThinking = false;
+    result.isThinking = false;
     return result;
   }
 

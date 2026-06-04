@@ -115,12 +115,14 @@ describe('sessionHistory loader', () => {
     })
   })
 
-  it('returns an empty array when the session_events query fails', async () => {
+  it('throws when the session_events query fails', async () => {
     queryBuilder.limit.mockResolvedValue({
       data: null,
       error: { message: 'database unavailable' },
     })
 
-    await expect(loadSessionHistory('session-123', 'user-123')).resolves.toEqual([])
+    await expect(loadSessionHistory('session-123', 'user-123')).rejects.toThrow(
+      'database unavailable',
+    )
   })
 })

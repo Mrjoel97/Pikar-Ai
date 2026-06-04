@@ -2,12 +2,53 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
-import { SessionMapProvider } from '@/contexts/SessionMapContext'
+import { SessionMapProvider, useSessionMap } from '@/contexts/SessionMapContext'
 import {
   SessionControlProvider,
   useSessionControl,
 } from '@/contexts/SessionControlContext'
 import { DEFAULT_SESSION_CONFIG } from '@/types/session'
+
+const supabaseMocks = vi.hoisted(() => {
+  const state = {
+    authStateChangeHandler: null as
+      | ((event: string, session: { user?: { id: string } } | null) => void)
+      | null,
+    getUser: vi.fn(),
+    onAuthStateChange: vi.fn(),
+    unsubscribe: vi.fn(),
+    from: vi.fn(),
+  }
+  state.onAuthStateChange.mockImplementation((handler) => {
+    state.authStateChangeHandler = handler
+    return {
+      data: {
+        subscription: {
+          unsubscribe: state.unsubscribe,
+        },
+      },
+    }
+  })
+  return state
+})
+
+const sessionServiceMocks = vi.hoisted(() => ({
+  listUserSessions: vi.fn(),
+}))
+
+vi.mock('@/lib/supabase/client', () => ({
+  createClient: vi.fn(() => ({
+    auth: {
+      getUser: supabaseMocks.getUser,
+      onAuthStateChange: supabaseMocks.onAuthStateChange,
+    },
+    from: supabaseMocks.from,
+  })),
+}))
+
+vi.mock('@/services/sessions', () => ({
+  listUserSessions: sessionServiceMocks.listUserSessions,
+}))
 
 // ---------------------------------------------------------------------------
 // localStorage mock
@@ -54,6 +95,12 @@ describe('SessionControlContext', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorageMock.clear()
+    supabaseMocks.authStateChangeHandler = null
+    supabaseMocks.getUser.mockResolvedValue({ data: { user: null } })
+    sessionServiceMocks.listUserSessions.mockResolvedValue({
+      sessions: [],
+      count: 0,
+    })
     // Default: config fetch returns 404 so we fall back to defaults
     fetchMock.mockResolvedValue({
       ok: false,
@@ -87,6 +134,100 @@ describe('SessionControlContext', () => {
       await waitFor(() => {
         expect(result.current.sessionRestored).toBe(true)
       })
+    })
+
+    it('loads sessions after SIGNED_IN when provider mounted logged out', async () => {
+      sessionServiceMocks.listUserSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 's-1',
+            title: 'Recovered chat',
+            preview: 'Welcome back',
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-01T11:00:00Z',
+          },
+        ],
+        count: 1,
+      })
+
+      const { result } = renderHook(
+        () => ({
+          control: useSessionControl(),
+          map: useSessionMap(),
+        }),
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(supabaseMocks.onAuthStateChange).toHaveBeenCalled()
+      })
+
+      await act(async () => {
+        supabaseMocks.authStateChangeHandler?.('SIGNED_IN', {
+          user: { id: 'user-123' },
+        })
+        await Promise.resolve()
+      })
+
+      await waitFor(() => {
+        expect(sessionServiceMocks.listUserSessions).toHaveBeenCalledTimes(1)
+      })
+      await waitFor(() => {
+        expect(result.current.map.sessions).toEqual([
+          {
+            id: 's-1',
+            title: 'Recovered chat',
+            preview: 'Welcome back',
+            createdAt: '2026-05-01T10:00:00Z',
+            updatedAt: '2026-05-01T11:00:00Z',
+          },
+        ])
+      })
+      expect(result.current.control.sessionsLoaded).toBe(true)
+    })
+
+    it('clears user-scoped session state on SIGNED_OUT', async () => {
+      supabaseMocks.getUser.mockResolvedValue({
+        data: { user: { id: 'user-123' } },
+      })
+      sessionServiceMocks.listUserSessions.mockResolvedValue({
+        sessions: [
+          {
+            id: 's-1',
+            title: 'Existing chat',
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-01T11:00:00Z',
+          },
+        ],
+        count: 1,
+      })
+
+      const { result } = renderHook(
+        () => ({
+          control: useSessionControl(),
+          map: useSessionMap(),
+        }),
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(result.current.map.sessions).toHaveLength(1)
+      })
+
+      act(() => {
+        result.current.control.setVisibleSessionId('s-1')
+      })
+
+      await act(async () => {
+        supabaseMocks.authStateChangeHandler?.('SIGNED_OUT', null)
+        await Promise.resolve()
+      })
+
+      await waitFor(() => {
+        expect(result.current.map.sessions).toEqual([])
+      })
+      expect(result.current.control.visibleSessionId).toBeNull()
+      expect(result.current.control.sessionsLoaded).toBe(false)
     })
   })
 
@@ -243,7 +384,7 @@ describe('SessionControlContext', () => {
   // Config fetch
   // -----------------------------------------------------------------------
   describe('config fetch', () => {
-    it('fetches config from /configuration/session-config on mount', async () => {
+    it('uses default config while remote session config is disabled', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -257,10 +398,10 @@ describe('SessionControlContext', () => {
       const { result } = renderHook(() => useSessionControl(), { wrapper })
 
       await waitFor(() => {
-        expect(result.current.config.max_concurrent_streams).toBe(8)
+        expect(result.current.sessionRestored).toBe(true)
       })
-      expect(result.current.config.memory_eviction_minutes).toBe(60)
-      expect(result.current.config.max_active_sessions_in_memory).toBe(50)
+      expect(result.current.config).toEqual(DEFAULT_SESSION_CONFIG)
+      expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it('uses defaults on fetch failure', async () => {
@@ -274,7 +415,7 @@ describe('SessionControlContext', () => {
       expect(result.current.config).toEqual(DEFAULT_SESSION_CONFIG)
     })
 
-    it('merges partial config response with defaults', async () => {
+    it('keeps defaults even when a partial config response mock is configured', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -287,15 +428,10 @@ describe('SessionControlContext', () => {
       const { result } = renderHook(() => useSessionControl(), { wrapper })
 
       await waitFor(() => {
-        expect(result.current.config.max_concurrent_streams).toBe(10)
+        expect(result.current.sessionRestored).toBe(true)
       })
-      // Defaults for omitted fields
-      expect(result.current.config.memory_eviction_minutes).toBe(
-        DEFAULT_SESSION_CONFIG.memory_eviction_minutes,
-      )
-      expect(result.current.config.max_active_sessions_in_memory).toBe(
-        DEFAULT_SESSION_CONFIG.max_active_sessions_in_memory,
-      )
+      expect(result.current.config).toEqual(DEFAULT_SESSION_CONFIG)
+      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 
@@ -341,11 +477,13 @@ describe('SessionControlContext', () => {
       const { result } = renderHook(() => useSessionControl(), { wrapper })
 
       expect(() => {
-        result.current.addSessionOptimistic({
-          id: 'opt-1',
-          title: 'Optimistic',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+        act(() => {
+          result.current.addSessionOptimistic({
+            id: 'opt-1',
+            title: 'Optimistic',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
         })
       }).not.toThrow()
     })

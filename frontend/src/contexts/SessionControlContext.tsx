@@ -14,6 +14,7 @@ import React, {
   useMemo,
   useRef,
 } from 'react'
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import type { SessionConfig } from '@/types/session'
 import { DEFAULT_SESSION_CONFIG } from '@/types/session'
 import { useSessionMap, type ChatSession } from './SessionMapContext'
@@ -179,6 +180,7 @@ export function SessionControlProvider({
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
   const [config, setConfig] = useState<SessionConfig>(DEFAULT_SESSION_CONFIG)
   const [userId, setUserId] = useState<string | null>(null)
+  const userIdRef = useRef<string | null>(null)
   const [refreshError, setRefreshError] = useState<Error | null>(null)
 
   // ---- Multi-session tab state (FEATURE-MULTI-SESSION-TABS) ----
@@ -246,28 +248,15 @@ export function SessionControlProvider({
   }, [openTabIds])
 
   // ------------------------------------------------------------------
-  // Cross-browser-tab sync — HOTFIX-06 success criterion 4
+  // Browser-tab isolation
   //
-  // The `storage` event fires on `window` in OTHER same-origin tabs ONLY
-  // when localStorage is mutated. Last-write-wins is acceptable per the
-  // ROADMAP — we just need to keep this tab's React state in sync with
-  // localStorage so the workspace and chat panel re-query for the new
-  // session_id rather than displaying stale data keyed on the old one.
-  //
-  // Do NOT call `setVisibleSessionId` (the persisting setter) from this
-  // handler — it would write to localStorage and risk a feedback loop.
-  // Use the raw setter so we update React state without touching storage.
+  // `pikar_current_session_id` is a reload-restore hint for this browser tab,
+  // not a live synchronization bus. Listening to cross-tab `storage` events
+  // here forced every same-origin browser tab onto the most recently selected
+  // session, which made it impossible to keep two sessions running side by
+  // side in separate tabs. We intentionally restore from localStorage on
+  // mount and persist local changes, but ignore writes from other tabs.
   // ------------------------------------------------------------------
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY) return
-      if (e.storageArea !== window.localStorage) return
-      // e.newValue is null when the key is removed (e.g. logout in other tab)
-      setVisibleSessionIdRaw(e.newValue)
-    }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [])
 
   // ------------------------------------------------------------------
   // localStorage persist — write whenever visibleSessionId changes
@@ -286,17 +275,66 @@ export function SessionControlProvider({
   }, [])
 
   // ------------------------------------------------------------------
-  // Get current user from Supabase auth
+  // Keep current user in sync with Supabase auth
+  //
+  // This provider is mounted at the root layout, including public auth
+  // pages. If it mounted while logged out and only read getUser() once, a
+  // client-side sign-in could leave userId stuck at null, making
+  // refreshSessions() a no-op until a hard reload.
   // ------------------------------------------------------------------
   useEffect(() => {
-    const getUser = async () => {
-      const { data } = await supabase.auth.getUser()
-      if (data.user) {
-        setUserId(data.user.id)
+    let cancelled = false
+
+    const applyUserId = (nextUserId: string | null) => {
+      if (cancelled) return
+      if (userIdRef.current === nextUserId) return
+
+      userIdRef.current = nextUserId
+      setUserId(nextUserId)
+      setSessionsLoaded(false)
+      setRefreshError(null)
+      setSessions([])
+
+      if (!nextUserId) {
+        setOpenTabIds([])
+        setVisibleSessionId(null)
+        clearAllPendingChatSessions()
       }
     }
+
+    const getUser = async () => {
+      try {
+        const { data } = await supabase.auth.getUser()
+        applyUserId(data.user?.id ?? null)
+      } catch (err) {
+        console.warn('Failed to resolve Supabase user for sessions:', err)
+      }
+    }
+
     getUser()
-  }, [supabase])
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      if (
+        event === 'SIGNED_IN' ||
+        event === 'TOKEN_REFRESHED' ||
+        event === 'INITIAL_SESSION'
+      ) {
+        applyUserId(session?.user?.id ?? null)
+        return
+      }
+
+      if (event === 'SIGNED_OUT') {
+        applyUserId(null)
+      }
+    })
+
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
+  }, [supabase, setSessions, setVisibleSessionId])
 
   // Config: uses DEFAULT_SESSION_CONFIG from @/types/session.
   // Remote config fetch will be enabled once the backend endpoint is deployed.
@@ -376,8 +414,7 @@ export function SessionControlProvider({
   // Transient-write note: the closeTab → createNewChat sequence transiently
   // writes [] to pikar_open_tab_ids between the two setOpenTabIds updaters,
   // then [newId]. This is acceptable today because pikar_open_tab_ids does
-  // NOT have a cross-tab `storage` event listener (only pikar_current_session_id
-  // does — Plan 88-01 scope). If a future phase adds cross-tab sync for
+  // NOT have a cross-tab `storage` event listener. If a future phase adds sync for
   // open tabs, the writes need to be unified (e.g., flushSync, a single
   // combined reducer, or a debounced effect).
   // ------------------------------------------------------------------

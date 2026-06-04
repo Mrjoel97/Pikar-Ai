@@ -4,44 +4,54 @@
 // Proprietary and confidential. See LICENSE file for details.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
-import { useWorkspaceEvents } from './useWorkspaceEvents';
+import { renderHook, act, waitFor } from '@testing-library/react';
+import type { FetchEventSourceInit } from '@microsoft/fetch-event-source';
 import type { WorkspaceEvent } from '@/types/workspace-events';
 
-class FakeEventSource {
-    public onmessage: ((evt: MessageEvent) => void) | null = null;
-    public onerror: ((evt: Event) => void) | null = null;
-    public close = vi.fn();
-    constructor(public url: string) {
-        FakeEventSource.instances.push(this);
-    }
-    static instances: FakeEventSource[] = [];
-    static reset() {
-        FakeEventSource.instances = [];
-    }
-}
+const fetchEventSourceMock = vi.hoisted(() => vi.fn());
+const getAccessTokenMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@microsoft/fetch-event-source', () => ({
+    fetchEventSource: fetchEventSourceMock,
+}));
+
+vi.mock('@/lib/supabase/client', () => ({
+    getAccessToken: getAccessTokenMock,
+}));
+
+vi.mock('@/services/api', () => ({
+    API_BASE_URL: 'https://api.example.com',
+}));
+
+import { useWorkspaceEvents } from './useWorkspaceEvents';
 
 describe('useWorkspaceEvents', () => {
     beforeEach(() => {
-        FakeEventSource.reset();
-        // @ts-expect-error patch global with our fake
-        global.EventSource = FakeEventSource;
+        vi.clearAllMocks();
+        getAccessTokenMock.mockResolvedValue('jwt-123');
+        fetchEventSourceMock.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
         vi.restoreAllMocks();
     });
 
-    it('opens an EventSource against /api/workspace/events', () => {
+    it('opens a fetch SSE stream with the current access token', async () => {
         renderHook(() => useWorkspaceEvents());
-        expect(FakeEventSource.instances).toHaveLength(1);
-        expect(FakeEventSource.instances[0].url).toBe('/api/workspace/events');
+
+        await waitFor(() => expect(fetchEventSourceMock).toHaveBeenCalledTimes(1));
+        const [url, init] = fetchEventSourceMock.mock.calls[0] as [
+            string,
+            FetchEventSourceInit,
+        ];
+        expect(url).toBe('https://api.example.com/workspace/events');
+        expect(init.headers).toMatchObject({
+            Accept: 'text/event-stream',
+            Authorization: 'Bearer jwt-123',
+        });
     });
 
-    it('appends incoming events in order', () => {
-        const { result } = renderHook(() => useWorkspaceEvents());
-        const source = FakeEventSource.instances[0];
-
+    it('appends incoming events in order', async () => {
         const a: WorkspaceEvent = {
             kind: 'progress',
             agent_id: 'FIN',
@@ -58,47 +68,64 @@ describe('useWorkspaceEvents', () => {
             summary: 's',
             preview_url: null,
         };
-
-        act(() => {
-            source.onmessage?.({ data: JSON.stringify(a) } as MessageEvent);
-            source.onmessage?.({ data: JSON.stringify(b) } as MessageEvent);
+        fetchEventSourceMock.mockImplementation(async (_url, init: FetchEventSourceInit) => {
+            act(() => {
+                init.onmessage?.({ data: JSON.stringify(a), event: '', id: '', retry: undefined });
+                init.onmessage?.({ data: JSON.stringify(b), event: '', id: '', retry: undefined });
+            });
         });
 
-        expect(result.current).toHaveLength(2);
+        const { result } = renderHook(() => useWorkspaceEvents());
+
+        await waitFor(() => expect(result.current).toHaveLength(2));
         expect(result.current[0]).toEqual(a);
         expect(result.current[1]).toEqual(b);
     });
 
-    it('closes the EventSource on unmount', () => {
+    it('aborts the stream on unmount', async () => {
+        let signal: AbortSignal | undefined;
+        fetchEventSourceMock.mockImplementation(async (_url, init: FetchEventSourceInit) => {
+            signal = init.signal;
+        });
+
         const { unmount } = renderHook(() => useWorkspaceEvents());
-        const source = FakeEventSource.instances[0];
+
+        await waitFor(() => expect(signal).toBeDefined());
+        expect(signal?.aborted).toBe(false);
         unmount();
-        expect(source.close).toHaveBeenCalledTimes(1);
+        expect(signal?.aborted).toBe(true);
     });
 
-    it('ignores malformed payloads instead of crashing', () => {
-        const { result } = renderHook(() => useWorkspaceEvents());
-        const source = FakeEventSource.instances[0];
+    it('ignores malformed payloads instead of crashing', async () => {
+        fetchEventSourceMock.mockImplementation(async (_url, init: FetchEventSourceInit) => {
+            act(() => {
+                init.onmessage?.({ data: '{not-json', event: '', id: '', retry: undefined });
+            });
+        });
 
         const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        act(() => {
-            source.onmessage?.({ data: '{not-json' } as MessageEvent);
-        });
+        const { result } = renderHook(() => useWorkspaceEvents());
+
+        await waitFor(() => expect(spy).toHaveBeenCalled());
         expect(result.current).toEqual([]);
-        expect(spy).toHaveBeenCalled();
     });
 
-    it('drops events with an unknown kind', () => {
-        const { result } = renderHook(() => useWorkspaceEvents());
-        const source = FakeEventSource.instances[0];
+    it('drops events with an unknown kind', async () => {
+        fetchEventSourceMock.mockImplementation(async (_url, init: FetchEventSourceInit) => {
+            act(() => {
+                init.onmessage?.({
+                    data: JSON.stringify({ kind: 'mystery', agent_id: 'X' }),
+                    event: '',
+                    id: '',
+                    retry: undefined,
+                });
+            });
+        });
 
         const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        act(() => {
-            source.onmessage?.({
-                data: JSON.stringify({ kind: 'mystery', agent_id: 'X' }),
-            } as MessageEvent);
-        });
+        const { result } = renderHook(() => useWorkspaceEvents());
+
+        await waitFor(() => expect(spy).toHaveBeenCalled());
         expect(result.current).toEqual([]);
-        expect(spy).toHaveBeenCalled();
     });
 });

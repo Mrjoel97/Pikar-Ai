@@ -27,11 +27,15 @@ describe('GET /api/sessions/list', () => {
         vi.resetModules()
         vi.clearAllMocks()
         process.env.BACKEND_URL = 'http://backend.test'
+        delete process.env.BACKEND_PUBLIC_HOST
+        delete process.env.NEXT_PUBLIC_API_URL
     })
 
     afterEach(() => {
         vi.unstubAllGlobals()
         delete process.env.BACKEND_URL
+        delete process.env.BACKEND_PUBLIC_HOST
+        delete process.env.NEXT_PUBLIC_API_URL
     })
 
     it('forwards the cookie JWT to the backend and returns the response', async () => {
@@ -58,6 +62,28 @@ describe('GET /api/sessions/list', () => {
         expect(url).toBe('http://backend.test/sessions?limit=25')
         const headers = new Headers(init.headers)
         expect(headers.get('Authorization')).toBe(`Bearer ${makeJwt('u')}`)
+    })
+
+    it('prefers the stable public backend host when configured', async () => {
+        process.env.BACKEND_PUBLIC_HOST = 'https://api.example.test/'
+        getUserMock.mockResolvedValue({ data: { user: { id: 'u' } } })
+        getSessionMock.mockResolvedValue({
+            data: { session: { access_token: makeJwt('u') } },
+            error: null,
+        })
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ sessions: [], count: 0 }),
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { GET } = await import('@/app/api/sessions/list/route')
+        const res = await GET(new Request('http://localhost/api/sessions/list') as never)
+
+        expect(res.status).toBe(200)
+        const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+        expect(url).toBe('https://api.example.test/sessions?limit=50')
     })
 
     it('returns 401 when no authenticated user', async () => {

@@ -9,7 +9,7 @@
 //   1. localStorage restore on mount
 //   2. localStorage persist on change
 //   3. createNewChat replaces stored id
-//   4. cross-browser-tab safety via the `storage` event (RED until Task 2)
+//   4. browser tabs do not live-hijack each other's visible session
 //
 // SessionControlProvider requires SessionMapProvider as a parent (calls
 // useSessionMap() at line 105-111) and uses the supabase client + the
@@ -27,6 +27,9 @@ vi.mock('@/lib/supabase/client', () => ({
   createClient: vi.fn(() => ({
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'test-user' } }, error: null }),
+      onAuthStateChange: vi.fn(() => ({
+        data: { subscription: { unsubscribe: vi.fn() } },
+      })),
     },
     from: vi.fn(() => ({
       select: vi.fn(() => ({
@@ -210,7 +213,7 @@ describe('SessionControlContext — persistence (HOTFIX-06)', () => {
     ).toContain(stored)
   })
 
-  it('Test 4: cross-tab storage event updates visibleSessionId', async () => {
+  it('Test 4: ignores cross-tab storage events so tabs can run independent sessions', async () => {
     localStorage.setItem(STORAGE_KEY, 'session-tab-A')
 
     renderWithProviders()
@@ -222,6 +225,8 @@ describe('SessionControlContext — persistence (HOTFIX-06)', () => {
     // jsdom does not fire `storage` from local localStorage.setItem in the
     // same window — the spec says it only fires in OTHER same-origin tabs.
     // We dispatch a synthetic StorageEvent to simulate another tab's write.
+    // The current tab must keep its own visible session so two browser tabs
+    // can run different sessions at the same time.
     await act(async () => {
       const event = new StorageEvent('storage', {
         key: STORAGE_KEY,
@@ -233,7 +238,7 @@ describe('SessionControlContext — persistence (HOTFIX-06)', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('vsid').textContent).toBe('session-tab-B')
+      expect(screen.getByTestId('vsid').textContent).toBe('session-tab-A')
     })
   })
 })

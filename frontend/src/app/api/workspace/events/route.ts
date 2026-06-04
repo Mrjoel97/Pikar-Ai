@@ -4,16 +4,15 @@
 /**
  * Proxy for the per-user workspace SSE channel.
  *
- * The browser hook (`useWorkspaceEvents`) opens an `EventSource` against the
- * Next.js origin. Native `EventSource` cannot attach an `Authorization`
- * header, and the FastAPI backend at `${BACKEND}/workspace/events` requires
- * `Authorization: Bearer <jwt>`. So we use the SSR Supabase client to read
- * the access token from the auth cookie and inject it as a Bearer header
- * before piping the upstream `ReadableStream` straight back to the client.
+ * The browser hook (`useWorkspaceEvents`) opens a fetch-based SSE stream
+ * against the Next.js origin with an Authorization header. We still keep the
+ * SSR cookie fallback here so older clients and cookie-backed refreshes can
+ * authenticate without native EventSource header support.
  */
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { backendFetch } from '@/lib/backendProxy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +22,9 @@ function resolveBackendUrl(): string {
     // restart) pick up the latest value without re-importing the module.
     return (
         process.env.WORKSPACE_EVENTS_BACKEND_URL
+        || process.env.BACKEND_PUBLIC_HOST
         || process.env.NEXT_PUBLIC_API_URL
+        || process.env.BACKEND_URL
         || 'http://127.0.0.1:8000'
     );
 }
@@ -31,10 +32,8 @@ function resolveBackendUrl(): string {
 export async function GET(req: Request): Promise<Response> {
     const upstreamUrl = `${resolveBackendUrl().replace(/\/$/, '')}/workspace/events`;
 
-    // Pull the Supabase access token from the auth cookie. EventSource can
-    // only send cookies, so the backend's Bearer-only auth would otherwise
-    // reject the request with 403. (See sessions/list/route.ts for the
-    // same SSR cookie → Bearer pattern.)
+    // Pull the Supabase access token from the auth cookie as a fallback for
+    // clients that do not send an explicit Authorization header.
     let accessToken: string | null = null;
     try {
         const supabase = await createClient();
@@ -60,7 +59,7 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     try {
-        const upstream = await fetch(upstreamUrl, {
+        const upstream = await backendFetch(upstreamUrl, {
             method: 'GET',
             headers,
             // SSE streams must not be cached or buffered.

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ActiveSessionState } from '@/types/session'
 import { createEmptyActiveSession } from '@/types/session'
@@ -31,6 +31,10 @@ vi.mock('@/lib/supabase/client', () => ({
 // Mock loadSessionHistory
 vi.mock('@/lib/sessionHistory', () => ({
   loadSessionHistory: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock('@/components/chat/SessionToast', () => ({
+  showSessionReadyToast: vi.fn(),
 }))
 
 // Mock widgetDisplay
@@ -317,6 +321,84 @@ describe('useAgentChat', () => {
     })
 
     expect(mockStartStream).not.toHaveBeenCalled()
+  })
+
+  it('keeps queued follow-up messages scoped to their originating session', async () => {
+    const sessionA = 'session-a'
+    const sessionB = 'session-b'
+    mockActiveSessions.set(sessionA, {
+      ...createEmptyActiveSession(sessionA),
+      messages: [{ id: 'welcome-message', role: 'agent', text: 'Hello A' }],
+    })
+    mockActiveSessions.set(sessionB, {
+      ...createEmptyActiveSession(sessionB),
+      messages: [{ id: 'welcome-message', role: 'agent', text: 'Hello B' }],
+    })
+    mockVisibleSessionId = sessionA
+
+    const { result, rerender } = renderHook(() => useAgentChat())
+
+    await act(async () => {
+      result.current.sendMessage('A1', 'auto')
+    })
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(1))
+    mockActiveSessions.set(sessionA, {
+      ...mockActiveSessions.get(sessionA)!,
+      status: 'streaming',
+    })
+
+    await act(async () => {
+      result.current.sendMessage('A2', 'auto')
+    })
+    expect(mockStartStream).toHaveBeenCalledTimes(1)
+
+    mockVisibleSessionId = sessionB
+    rerender()
+
+    await act(async () => {
+      result.current.sendMessage('B1', 'auto')
+    })
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(2))
+    mockActiveSessions.set(sessionB, {
+      ...mockActiveSessions.get(sessionB)!,
+      status: 'streaming',
+    })
+
+    await act(async () => {
+      result.current.sendMessage('B2', 'auto')
+    })
+    expect(mockStartStream).toHaveBeenCalledTimes(2)
+
+    const completeStream = async (callIndex: number, sessionId: string) => {
+      const options = mockStartStream.mock.calls[callIndex]?.[0] as
+        | { onStreamComplete?: (sid: string, finalText: string) => void }
+        | undefined
+      expect(options).toBeTruthy()
+      await act(async () => {
+        options?.onStreamComplete?.(sessionId, `${sessionId} complete`)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+    }
+
+    await completeStream(0, sessionA)
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(3))
+    expect(mockStartStream.mock.calls[2][0]).toMatchObject({
+      sessionId: sessionA,
+      message: 'A2',
+    })
+
+    await completeStream(2, sessionA)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(mockStartStream).toHaveBeenCalledTimes(3)
+
+    await completeStream(1, sessionB)
+    await waitFor(() => expect(mockStartStream).toHaveBeenCalledTimes(4))
+    expect(mockStartStream.mock.calls[3][0]).toMatchObject({
+      sessionId: sessionB,
+      message: 'B2',
+    })
   })
 
   // -----------------------------------------------------------------------

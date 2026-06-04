@@ -25,6 +25,9 @@ describe('GET /api/workspace/events', () => {
     beforeEach(() => {
         process.env.NEXT_PUBLIC_API_URL = 'https://api.example.com';
         delete process.env.WORKSPACE_EVENTS_BACKEND_URL;
+        delete process.env.BACKEND_PUBLIC_HOST;
+        delete process.env.BACKEND_URL;
+        delete process.env.PIKAR_PROXY_SECRET;
         vi.restoreAllMocks();
         getSessionMock.mockResolvedValue({ data: { session: null }, error: null });
     });
@@ -32,6 +35,9 @@ describe('GET /api/workspace/events', () => {
     afterEach(() => {
         delete process.env.NEXT_PUBLIC_API_URL;
         delete process.env.WORKSPACE_EVENTS_BACKEND_URL;
+        delete process.env.BACKEND_PUBLIC_HOST;
+        delete process.env.BACKEND_URL;
+        delete process.env.PIKAR_PROXY_SECRET;
     });
 
     it('proxies to the backend SSE endpoint with text/event-stream content-type', async () => {

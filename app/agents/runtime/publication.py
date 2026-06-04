@@ -374,6 +374,40 @@ async def publish_artifact(
 # ---------------------------------------------------------------------------
 
 
+def _report_table_cell(value: object) -> str:
+    """Keep generated markdown tables stable when agent text contains pipes."""
+    text = str(value or "-").replace("\r\n", "\n").replace("\r", "\n")
+    return " ".join(text.split()).replace("|", "\\|") or "-"
+
+
+def _report_status_label(value: object) -> str:
+    text = str(value or "").replace("_", " ").strip()
+    return text.title() if text else "-"
+
+
+def _report_evidence_labels(item: TodoItem) -> str:
+    evidence_strs: list[str] = []
+    for ev in item.evidence or []:
+        if isinstance(ev, dict):
+            label = ev.get("ref") or ev.get("summary") or ev.get("kind") or ""
+            evidence_strs.append(str(label))
+        else:
+            evidence_strs.append(str(ev))
+    return ", ".join(s for s in evidence_strs if s) or "-"
+
+
+def _report_follow_ups(
+    research: ResearchResult | None,
+    audit: AuditReport | None,
+) -> list[str]:
+    follow_ups: list[str] = []
+    if research is not None:
+        follow_ups.extend(f"Open: {m}" for m in research.missing_information)
+    if audit is not None:
+        follow_ups.extend(f"Audit gap: {g}" for g in audit.gaps)
+    return follow_ups
+
+
 async def render_report_markdown(
     *,
     contract: TaskContract,
@@ -384,14 +418,19 @@ async def render_report_markdown(
 ) -> str:
     """Produce the structured markdown report for the knowledge vault.
 
-    Follows the spec §11 template exactly (Goal, To-Do Outcomes,
-    Success Criteria, Research Summary, Sources, Contradictions, Artifacts,
-    Audit Report, Policy Notes, Follow-ups). Missing optional inputs are
-    rendered as ``"_none_"`` placeholders rather than omitted so downstream
-    semantic search has a stable field set to chunk against.
+    The report starts with a concise, CV-like executive document structure:
+    title block, snapshot, target outcome, grouped workstreams, evidence, and
+    action plan. The original spec §11 anchors (Goal, To-Do Outcomes, Success
+    Criteria, Research Summary, Sources, Contradictions, Artifacts, Audit
+    Report, Policy Notes, Follow-ups) remain present so downstream semantic
+    search and tests keep a stable field set to chunk against.
     """
     agent_id_str = _agent_id_str(agent_id)
     now_iso = datetime.now(timezone.utc).isoformat()
+    audit_status = audit.overall_status if audit is not None else "not_audited"
+    next_action = audit.next_action if audit is not None else "Review generated output"
+    source_count = len(research.sources) if research is not None else 0
+    follow_ups = _report_follow_ups(research, audit)
     lines: list[str] = []
 
     lines.append(f"# {agent_id_str} - {contract.goal}")
@@ -406,8 +445,37 @@ async def render_report_markdown(
     lines.append(f"**Owner:** {agent_id_str} - **Task:** `{contract.id}`")
     lines.append("")
 
+    lines.append("## Executive Snapshot")
+    lines.append(f"**Prepared by:** {agent_id_str}")
+    lines.append(f"**Status:** {_report_status_label(audit_status)}")
+    lines.append(f"**Sources reviewed:** {source_count}")
+    lines.append(f"**Artifacts produced:** {len(artifacts)}")
+    lines.append(f"**Recommended next step:** {next_action}")
+    if research is not None and research.summary:
+        lines.append("")
+        lines.append(research.summary)
+    lines.append("")
+
     lines.append("## Goal")
     lines.append(contract.goal)
+    lines.append("")
+
+    lines.append("## Target Outcome")
+    if contract.success_criteria:
+        for crit in contract.success_criteria:
+            lines.append(f"- {crit}")
+    else:
+        lines.append("_none declared_")
+    lines.append("")
+
+    lines.append("## Core Workstreams")
+    if contract.todo_items:
+        for item in contract.todo_items:
+            lines.append(
+                f"- **{item.title}** - {_report_status_label(item.status)}"
+            )
+    else:
+        lines.append("_none_")
     lines.append("")
 
     lines.append("## To-Do Outcomes")
@@ -415,15 +483,13 @@ async def render_report_markdown(
         lines.append("| Item | Status | Evidence |")
         lines.append("| --- | --- | --- |")
         for item in contract.todo_items:
-            evidence_strs: list[str] = []
-            for ev in item.evidence or []:
-                if isinstance(ev, dict):
-                    label = ev.get("ref") or ev.get("summary") or ev.get("kind") or ""
-                    evidence_strs.append(str(label))
-                else:
-                    evidence_strs.append(str(ev))
-            evidence = ", ".join(s for s in evidence_strs if s) or "-"
-            lines.append(f"| {item.title} | {item.status} | {evidence} |")
+            evidence = _report_evidence_labels(item)
+            lines.append(
+                "| "
+                f"{_report_table_cell(item.title)} | "
+                f"{_report_table_cell(_report_status_label(item.status))} | "
+                f"{_report_table_cell(evidence)} |"
+            )
     else:
         lines.append("_none_")
     lines.append("")
@@ -506,12 +572,23 @@ async def render_report_markdown(
         lines.append("_none_")
     lines.append("")
 
+    lines.append("## Action Plan")
+    if follow_ups:
+        lines.append("| Action | Source | Priority |")
+        lines.append("| --- | --- | --- |")
+        for f in follow_ups:
+            source = "Audit" if f.startswith("Audit gap:") else "Research"
+            lines.append(
+                "| "
+                f"{_report_table_cell(f)} | "
+                f"{source} | "
+                "High |"
+            )
+    else:
+        lines.append(f"- {next_action}")
+    lines.append("")
+
     lines.append("## Follow-ups")
-    follow_ups: list[str] = []
-    if research is not None:
-        follow_ups.extend(f"Open: {m}" for m in research.missing_information)
-    if audit is not None:
-        follow_ups.extend(f"Audit gap: {g}" for g in audit.gaps)
     if follow_ups:
         for f in follow_ups:
             lines.append(f"- {f}")

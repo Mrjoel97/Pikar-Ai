@@ -12,11 +12,11 @@
 import { useCallback, useRef } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { getAccessToken, getAuthenticatedUser } from '@/lib/supabase/client';
-import { createAccumulator, parseSSEEvent } from '@/lib/sseParser';
+import { createAccumulator, parseSSEEvent, type LongTaskEvent } from '@/lib/sseParser';
 import { useSessionMap } from '@/contexts/SessionMapContext';
 import { useSessionControl } from '@/contexts/SessionControlContext';
 import type { PendingSessionAction, RawWidgetData } from '@/types/session';
-import type { Message, AgentMode } from '@/hooks/useAgentChat';
+import type { Message, AgentMode, TraceStep } from '@/hooks/useAgentChat';
 import { validateWidgetDefinition, type WidgetDefinition } from '@/types/widgets';
 import {
   WidgetDisplayService,
@@ -67,6 +67,9 @@ export interface UseBackgroundStreamReturn {
 
 const STREAM_AUTH_LOOKUP_TIMEOUT_MS = 2500;
 const DEFAULT_RETRY_DELAYS_MS = [1500, 5000, 15000, 30000, 30000];
+const LONG_TASK_POLL_INITIAL_MS = 2500;
+const LONG_TASK_POLL_MAX_MS = 8000;
+const LONG_TASK_POLL_DEADLINE_MS = 30 * 60 * 1000;
 
 class RetryableSseStartupError extends Error {
   retryAfterMs: number | null;
@@ -96,6 +99,57 @@ function parseRetryAfterMs(headerValue: string | null): number | null {
   return Math.max(0, retryDateMs - Date.now());
 }
 
+interface JobProgressResponse {
+  job_id?: string;
+  kind?: string;
+  status?: string;
+  progress_pct?: number | null;
+  message?: string | null;
+  result?: unknown;
+  error?: string | null;
+}
+
+function formatLongTaskStatus(job: LongTaskEvent | JobProgressResponse): string {
+  const kind = job.kind || 'background task';
+  const status = (job.status || '').toLowerCase();
+  const progressPct = getLongTaskProgressPct(job);
+  if (status === 'completed') return `${kind} completed.`;
+  if (status === 'failed' || status === 'cancelled') {
+    return `${kind} failed${job.error ? `: ${job.error}` : '.'}`;
+  }
+  if (job.message) return job.message;
+  if (typeof progressPct === 'number') {
+    return `${kind} is running (${Math.round(progressPct)}%).`;
+  }
+  return `${kind} is running in the background.`;
+}
+
+function getLongTaskProgressPct(job: LongTaskEvent | JobProgressResponse): number | null | undefined {
+  const normalized = job as { progressPct?: number | null; progress_pct?: number | null };
+  return normalized.progressPct ?? normalized.progress_pct;
+}
+
+function getLongTaskJobId(job: LongTaskEvent | JobProgressResponse): string | undefined {
+  const normalized = job as { jobId?: string; job_id?: string };
+  return normalized.jobId ?? normalized.job_id;
+}
+
+function extractWidgetFromJobResult(result: unknown): WidgetDefinition | null {
+  if (validateWidgetDefinition(result)) {
+    return result as WidgetDefinition;
+  }
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const candidate = result as Record<string, unknown>;
+    if (validateWidgetDefinition(candidate.widget)) {
+      return candidate.widget as WidgetDefinition;
+    }
+    if (validateWidgetDefinition(candidate.result)) {
+      return candidate.result as WidgetDefinition;
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -110,6 +164,7 @@ export function useBackgroundStream(): UseBackgroundStreamReturn {
   visibleSessionIdRef.current = visibleSessionId;
 
   const widgetServiceRef = useRef(new WidgetDisplayService());
+  const activeLongTaskPollsRef = useRef(new Map<string, AbortController>());
 
   // ------------------------------------------------------------------
   // stopStream
@@ -122,6 +177,12 @@ export function useBackgroundStream(): UseBackgroundStreamReturn {
       const session = ref.current;
       if (session.abortController) {
         session.abortController.abort();
+      }
+      for (const [key, controller] of activeLongTaskPollsRef.current.entries()) {
+        if (key.startsWith(`${sessionId}:`)) {
+          controller.abort();
+          activeLongTaskPollsRef.current.delete(key);
+        }
       }
 
       // Write to ref immediately
@@ -258,6 +319,169 @@ export function useBackgroundStream(): UseBackgroundStreamReturn {
       const MAX_RETRIES = DEFAULT_RETRY_DELAYS_MS.length;
 
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+      const updateLongTaskMessage = (
+        event: LongTaskEvent | JobProgressResponse,
+        widget?: WidgetDefinition,
+      ) => {
+        const ref = getActiveSessionRef(sessionId);
+        if (!ref?.current) return;
+
+        const messages = [...ref.current.messages];
+        const targetIdx = messages.findIndex((m) => m.id === agentMsgId);
+        if (targetIdx === -1 || messages[targetIdx].role !== 'agent') return;
+
+        const existing = messages[targetIdx];
+        const statusText = formatLongTaskStatus(event);
+        const jobId = getLongTaskJobId(event);
+        const traceKey = `${jobId ?? ''}:${event.status ?? 'pending'}:${statusText}`;
+        const existingTraces = existing.traces ?? [];
+        const hasTrace = existingTraces.some((trace) => trace.content === statusText);
+        const nextTrace: TraceStep = {
+          type: event.status === 'completed' || event.error ? 'tool_output' : 'tool_use',
+          toolName: event.kind || 'Background task',
+          content: statusText || traceKey,
+        };
+        const nextTraces: TraceStep[] = hasTrace
+          ? existingTraces
+          : [
+              ...existingTraces,
+              nextTrace,
+            ];
+
+        const nextWidget = widget ? withWorkspaceDefaults(widget) : existing.widget;
+        messages[targetIdx] = {
+          ...existing,
+          text: existing.text || statusText,
+          traces: nextTraces,
+          isThinking: false,
+          ...(nextWidget ? { widget: nextWidget } : {}),
+        };
+
+        ref.current = {
+          ...ref.current,
+          messages,
+          hasUnread: visibleSessionIdRef.current !== sessionId ? true : ref.current.hasUnread,
+          lastUpdatedAt: Date.now(),
+        };
+
+        updateSessionState(sessionId, {
+          messages,
+          hasUnread: visibleSessionIdRef.current !== sessionId ? true : ref.current.hasUnread,
+        });
+
+        if (widget && userId) {
+          const processedWidget = withWorkspaceDefaults(widget);
+          if (isWorkspaceCanvasWidget(processedWidget)) {
+            const widgetAny = processedWidget as WidgetDefinition & { id?: string };
+            if (!widgetAny.id) {
+              const saved = widgetServiceRef.current.saveWidget(
+                userId,
+                sessionId,
+                processedWidget,
+                false,
+              );
+              if (saved) {
+                widgetAny.id = saved.id;
+              }
+            }
+            dispatchWorkspaceWidget(processedWidget, userId, {
+              sessionId,
+              setActive: visibleSessionIdRef.current === sessionId,
+              mode: processedWidget.workspace?.mode ?? 'focus',
+              persistent: false,
+            });
+            if (visibleSessionIdRef.current === sessionId) {
+              dispatchFocusWidget(processedWidget, userId);
+            } else {
+              ref.current.pendingActions.push({
+                type: 'focus_widget',
+                payload: processedWidget,
+              });
+            }
+          }
+        }
+
+        if (userId) {
+          dispatchWorkspaceActivity({
+            userId,
+            sessionId,
+            phase: event.status === 'completed' ? 'completed' : event.error ? 'error' : 'running',
+            agentName: agentDisplayName,
+            text: statusText,
+            traces: nextTraces,
+          });
+        }
+      };
+
+      const startLongTaskPolling = (event: LongTaskEvent) => {
+        if (!event.jobId || !event.pollUrl) return;
+
+        const pollKey = `${sessionId}:${event.jobId}`;
+        if (activeLongTaskPollsRef.current.has(pollKey)) return;
+
+        const pollController = new AbortController();
+        activeLongTaskPollsRef.current.set(pollKey, pollController);
+        updateLongTaskMessage({ ...event, status: event.status || 'pending' });
+
+        void (async () => {
+          let delayMs = LONG_TASK_POLL_INITIAL_MS;
+          const deadline = Date.now() + LONG_TASK_POLL_DEADLINE_MS;
+          try {
+            while (!pollController.signal.aborted && Date.now() < deadline) {
+              await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+              if (pollController.signal.aborted) return;
+
+              const pollPath = event.pollUrl!.startsWith('/')
+                ? event.pollUrl!
+                : `/jobs/${event.jobId}/progress`;
+              const response = await fetch(`${API_URL}${pollPath}`, {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+                signal: pollController.signal,
+              });
+
+              if (!response.ok) {
+                throw new Error(`Job polling failed: ${response.status} ${response.statusText}`);
+              }
+
+              const progress = await response.json() as JobProgressResponse;
+              const status = (progress.status || '').toLowerCase();
+              const widget =
+                status === 'completed'
+                  ? extractWidgetFromJobResult(progress.result)
+                  : null;
+              updateLongTaskMessage(progress, widget ?? undefined);
+
+              if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+                return;
+              }
+
+              delayMs = Math.min(Math.round(delayMs * 1.4), LONG_TASK_POLL_MAX_MS);
+            }
+
+            updateLongTaskMessage({
+              job_id: event.jobId,
+              kind: event.kind,
+              status: 'processing',
+              message: 'Still running in the background. I will keep this job in your workspace once it finishes.',
+            });
+          } catch (error) {
+            if (!pollController.signal.aborted) {
+              const message = error instanceof Error ? error.message : 'Job polling failed';
+              updateLongTaskMessage({
+                job_id: event.jobId,
+                kind: event.kind,
+                status: 'failed',
+                error: message,
+              });
+            }
+          } finally {
+            activeLongTaskPollsRef.current.delete(pollKey);
+          }
+        })();
+      };
 
       // ---- Helper: mark last agent message with reconnecting indicator ----
       const setReconnectingIndicator = (isReconnecting: boolean, attempt: number) => {
@@ -502,6 +726,8 @@ export function useBackgroundStream(): UseBackgroundStreamReturn {
                           text: p.text as string | undefined,
                           traces: p.traces as { type: 'thinking' | 'tool_use' | 'tool_output'; content: string; toolName?: string }[],
                         });
+                      } else if (effect.type === 'long_task') {
+                        startLongTaskPolling(effect.payload as LongTaskEvent);
                       }
                     }
                   }
@@ -528,6 +754,8 @@ export function useBackgroundStream(): UseBackgroundStreamReturn {
                         type: effect.type as 'focus_widget' | 'workspace_activity',
                         payload: effect.payload,
                       });
+                    } else if (effect.type === 'long_task') {
+                      startLongTaskPolling(effect.payload as LongTaskEvent);
                     }
                   }
 
