@@ -171,10 +171,13 @@ _BINARY_DOCUMENT_MIME_BY_EXTENSION: dict[str, str] = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
 
-def _extract_binary_document_content(temp_path: str, original_filename: str) -> str | None:
+def _extract_binary_document_content(
+    temp_path: str, original_filename: str
+) -> str | None:
     extension = os.path.splitext(original_filename.lower())[1]
     mime_type = _BINARY_DOCUMENT_MIME_BY_EXTENSION.get(extension)
     if mime_type is None:
@@ -184,7 +187,9 @@ def _extract_binary_document_content(temp_path: str, original_filename: str) -> 
         file_bytes = uploaded_file.read()
 
     try:
-        content = extract_text_from_bytes(file_bytes, mime_type, filename=original_filename)
+        content = extract_text_from_bytes(
+            file_bytes, mime_type, filename=original_filename
+        )
     except ExtractionError as exc:
         return f"[Error extracting {original_filename}: {exc}]"
 
@@ -314,7 +319,11 @@ async def _write_upload_to_temp_file(
 
 @router.post("/upload", response_model=FileUploadResponse)
 @limiter.limit(get_user_persona_limit)
-async def upload_file(request: Request, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
     """
     Upload a file, extract its text content, and return a prompt for the agent.
     """
@@ -389,7 +398,6 @@ async def upload_file_to_vault(
         with open(temp_path, "rb") as uploaded_file:
             raw_bytes = uploaded_file.read()
 
-        content = _extract_file_content(temp_path, original_filename)
         safe_filename = _sanitize_filename_fragment(original_filename)
         file_path = f"{user_id}/uploads/{uuid4().hex}-{safe_filename}"
         file_type = file.content_type or "application/octet-stream"
@@ -424,7 +432,27 @@ async def upload_file_to_vault(
         inserted_rows = inserted.data or []
         document_id = inserted_rows[0].get("id") if inserted_rows else None
 
-        if not _is_extractable_content(content):
+        try:
+            content = extract_text_from_bytes(
+                raw_bytes,
+                file_type,
+                filename=original_filename,
+            )
+        except ExtractionError as exc:
+            return VaultUploadResponse(
+                success=True,
+                document_id=document_id,
+                filename=original_filename,
+                file_path=file_path,
+                processed=False,
+                embedding_count=0,
+                message=(
+                    "File saved to the Knowledge Vault, but text extraction failed: "
+                    f"{exc}"
+                ),
+            )
+
+        if content is None or not content.strip():
             return VaultUploadResponse(
                 success=True,
                 document_id=document_id,
@@ -443,6 +471,8 @@ async def upload_file_to_vault(
             metadata={
                 **metadata,
                 "document_id": document_id,
+                "content_format": "markdown",
+                "converter": "markitdown",
             },
         )
         embedding_count = int(ingest_result.get("chunk_count", 0) or 0)
@@ -454,13 +484,17 @@ async def upload_file_to_vault(
                 "metadata": {
                     **metadata,
                     "document_id": document_id,
+                    "content_format": "markdown",
+                    "converter": "markitdown",
                 },
             }
         )
         if document_id:
             update_query = update_query.eq("id", document_id)
         else:
-            update_query = update_query.eq("user_id", user_id).eq("file_path", file_path)
+            update_query = update_query.eq("user_id", user_id).eq(
+                "file_path", file_path
+            )
 
         await execute_async(update_query, op_name="files.upload_to_vault.finalize")
 
@@ -505,6 +539,7 @@ _EXTENSION_TYPE_MAP: dict[str, tuple[str, str]] = {
     ".md": ("document", "Markdown Document"),
     ".doc": ("document", "Word Document"),
     ".docx": ("document", "Word Document"),
+    ".pptx": ("presentation", "PowerPoint Presentation"),
     ".json": ("data", "JSON Data"),
     ".py": ("document", "Python Source"),
     ".js": ("document", "JavaScript Source"),
@@ -732,6 +767,8 @@ def _build_smart_summary(
         return _generate_json_preview(temp_path)
     if ext in (".docx", ".doc"):
         return _generate_docx_preview(temp_path)
+    if ext == ".pptx":
+        return "PowerPoint presentation. Upload processing will extract slide text, tables, and notes when available."
     if detected_type == "document":
         return _generate_text_preview(temp_path)
 
@@ -741,7 +778,11 @@ def _build_smart_summary(
 
 @router.post("/upload/smart", response_model=SmartUploadResponse)
 @limiter.limit(get_user_persona_limit)
-async def smart_upload(request: Request, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def smart_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
     """Smart file upload with content-type detection and preview summary.
 
     Returns metadata about the uploaded file so the frontend can offer

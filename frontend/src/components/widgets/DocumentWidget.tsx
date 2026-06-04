@@ -4,11 +4,11 @@
 /**
  * DocumentWidget - Renders a document download card in the chat UI.
  *
- * Displays file icon, title, type badge, size, and download button for
- * agent-generated documents (PDF, PPTX, CSV).
+ * Displays file icon, title, type badge, size/source, and open/download button
+ * for agent-generated documents.
  */
 
-import { Download, FileSpreadsheet, FileText } from 'lucide-react';
+import { Download, ExternalLink, FileSpreadsheet, FileText, Presentation } from 'lucide-react';
 import type { WidgetProps } from './WidgetRegistry';
 import type { DocumentWidgetData } from '@/types/widgets';
 
@@ -21,13 +21,22 @@ const FILE_TYPE_CONFIG: Record<string, { label: string; color: string; bgColor: 
     pptx: { label: 'PPTX', color: 'text-orange-600 dark:text-orange-400', bgColor: 'bg-orange-50 dark:bg-orange-900/30' },
     csv: { label: 'CSV', color: 'text-green-600 dark:text-green-400', bgColor: 'bg-green-50 dark:bg-green-900/30' },
     xlsx: { label: 'XLSX', color: 'text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-50 dark:bg-emerald-900/30' },
+    docx: { label: 'DOCX', color: 'text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-50 dark:bg-blue-900/30' },
+    gdoc: { label: 'Google Doc', color: 'text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-50 dark:bg-blue-900/30' },
+    gsheet: { label: 'Google Sheet', color: 'text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-50 dark:bg-emerald-900/30' },
+    gform: { label: 'Google Form', color: 'text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-50 dark:bg-purple-900/30' },
+    google_doc: { label: 'Google Doc', color: 'text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-50 dark:bg-blue-900/30' },
+    google_sheet: { label: 'Google Sheet', color: 'text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-50 dark:bg-emerald-900/30' },
+    google_form: { label: 'Google Form', color: 'text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-50 dark:bg-purple-900/30' },
 };
 
-function formatFileSize(bytes: number): string {
-    if (bytes === 0) return '0 B';
+function formatFileSize(bytes?: number): string | null {
+    if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) {
+        return null;
+    }
     const units = ['B', 'KB', 'MB', 'GB'];
     const k = 1024;
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1);
     const size = bytes / Math.pow(k, i);
     return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
@@ -36,7 +45,10 @@ function FileIcon({ fileType }: { fileType: string }) {
     const config = FILE_TYPE_CONFIG[fileType];
     const colorClass = config?.color ?? 'text-slate-500';
 
-    if (fileType === 'csv' || fileType === 'pptx' || fileType === 'xlsx') {
+    if (fileType === 'pptx') {
+        return <Presentation className={`w-8 h-8 ${colorClass}`} />;
+    }
+    if (fileType === 'csv' || fileType === 'xlsx' || fileType === 'gsheet') {
         return <FileSpreadsheet className={`w-8 h-8 ${colorClass}`} />;
     }
     return <FileText className={`w-8 h-8 ${colorClass}`} />;
@@ -48,7 +60,12 @@ function FileIcon({ fileType }: { fileType: string }) {
 
 export default function DocumentWidget({ definition }: WidgetProps) {
     const data = definition.data as unknown as DocumentWidgetData;
-    const { documentUrl, title, fileType, sizeBytes, templateName } = data;
+    const { sizeBytes, templateName } = data;
+    const documentUrl = data.documentUrl || data.url || '';
+    const title = data.title || definition.title || 'Document';
+    const fileType = (data.fileType || data.kind || 'file').toLowerCase();
+    const isCloudDocument = ['gdoc', 'gsheet', 'gform', 'google_doc', 'google_sheet', 'google_form'].includes(fileType);
+    const fileSize = formatFileSize(sizeBytes);
 
     const config = FILE_TYPE_CONFIG[fileType] ?? {
         label: fileType?.toUpperCase() ?? 'FILE',
@@ -77,7 +94,7 @@ export default function DocumentWidget({ definition }: WidgetProps) {
                         {config.label}
                     </span>
                     <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {formatFileSize(sizeBytes)}
+                        {fileSize ?? (isCloudDocument ? 'Cloud document' : 'Ready')}
                     </span>
                     {templateName && (
                         <span className="text-xs text-slate-400 dark:text-slate-500 truncate">
@@ -91,10 +108,14 @@ export default function DocumentWidget({ definition }: WidgetProps) {
             <button
                 onClick={handleDownload}
                 className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40 transition-colors"
-                aria-label={`Download ${title}`}
-                title="Download"
+                aria-label={`${isCloudDocument ? 'Open' : 'Download'} ${title}`}
+                title={isCloudDocument ? 'Open' : 'Download'}
             >
-                <Download className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                {isCloudDocument ? (
+                    <ExternalLink className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                ) : (
+                    <Download className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                )}
             </button>
         </div>
     );

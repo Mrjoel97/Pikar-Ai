@@ -82,7 +82,7 @@ async def upload_knowledge_file(
     """Upload a document, image, or video to the agent knowledge base.
 
     Routes the file to the appropriate processing pipeline based on MIME type:
-    - PDF / DOCX / XLSX / text files → process_document (returns 200)
+    - PDF / DOCX / XLSX / XLS / PPTX / text files → process_document (returns 200)
     - Image files             → process_image (returns 200)
     - Video files             → process_video (returns 202, background processing)
 
@@ -152,10 +152,7 @@ async def upload_knowledge_file(
             return JSONResponse(content=result, status_code=202)
 
         # Documents: application/pdf, application/vnd.openxml*, text/*, octet-stream
-        if (
-            content_type.startswith("application/")
-            or content_type.startswith("text/")
-        ):
+        if content_type.startswith("application/") or content_type.startswith("text/"):
             result = await knowledge_service.process_document(
                 file_bytes=file_bytes,
                 filename=filename,
@@ -168,7 +165,7 @@ async def upload_knowledge_file(
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported content type '{content_type}'. "
-                   "Upload PDF, DOCX, XLSX, CSV, TXT, MD, image/*, or video/* files.",
+            "Upload PDF, DOCX, XLSX, XLS, PPTX, CSV, TXT, MD, image/*, or video/* files.",
         )
     except HTTPException:
         raise
@@ -289,9 +286,7 @@ async def get_knowledge_entry(
         )
         rows = result.data or []
         if not rows:
-            raise HTTPException(
-                status_code=404, detail=f"Entry '{entry_id}' not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Entry '{entry_id}' not found")
         return rows[0]
     except HTTPException:
         raise
@@ -337,23 +332,17 @@ async def delete_knowledge_entry(
             op_name=f"delete_knowledge_entry.fetch.{entry_id}",
         )
         if not (entry_result.data or []):
-            raise HTTPException(
-                status_code=404, detail=f"Entry '{entry_id}' not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Entry '{entry_id}' not found")
 
         # Delete embeddings first
         await execute_async(
-            client.table("embeddings")
-            .delete()
-            .eq("source_id", entry_id),
+            client.table("embeddings").delete().eq("source_id", entry_id),
             op_name=f"delete_knowledge_entry.embeddings.{entry_id}",
         )
 
         # Delete the tracking entry
         await execute_async(
-            client.table("admin_knowledge_entries")
-            .delete()
-            .eq("id", entry_id),
+            client.table("admin_knowledge_entries").delete().eq("id", entry_id),
             op_name=f"delete_knowledge_entry.entry.{entry_id}",
         )
 

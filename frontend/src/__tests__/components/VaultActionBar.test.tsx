@@ -24,6 +24,19 @@ describe('<VaultActionBar />', () => {
         expect(screen.getByRole('button', { name: /use in campaign/i })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /draft an email/i })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /custom prompt/i })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /continue idea/i })).toBeNull()
+    })
+
+    it('renders the continue idea chip for selected brain dump markdown', () => {
+        render(
+            <VaultActionBar
+                selectedCount={1}
+                showContinueIdea
+                onAction={vi.fn()}
+                onClear={vi.fn()}
+            />,
+        )
+        expect(screen.getByRole('button', { name: /continue idea/i })).toBeInTheDocument()
     })
 
     it('returns null when selectedCount is 0', () => {

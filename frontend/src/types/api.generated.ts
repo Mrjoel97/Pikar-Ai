@@ -9422,6 +9422,8 @@ export interface components {
             transcript_markdown?: string | null;
             /** Transcript File Path */
             transcript_file_path?: string | null;
+            /** Transcript Doc Id */
+            transcript_doc_id?: string | null;
             /** Saved Categories */
             saved_categories?: string[];
             /** Error */
@@ -9431,6 +9433,8 @@ export interface components {
             analysis_doc_id?: string | null;
             /** Analysis Markdown */
             analysis_markdown?: string | null;
+            /** Analysis Pending */
+            analysis_pending?: boolean;
         };
         /**
          * BrainstormSummary

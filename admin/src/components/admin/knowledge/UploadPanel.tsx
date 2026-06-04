@@ -26,7 +26,7 @@ const AGENT_SCOPES = [
 
 /** MIME types and file extensions accepted by the upload panel. */
 const ACCEPTED_MIME =
-  'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/png,image/jpeg,image/svg+xml,video/mp4,video/quicktime,video/webm,.pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.svg,.mp4,.mov,.webm';
+  'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown,text/csv,text/html,text/xml,application/json,image/png,image/jpeg,image/svg+xml,video/mp4,video/quicktime,video/webm,.pdf,.docx,.xlsx,.xls,.pptx,.csv,.txt,.md,.html,.htm,.json,.xml,.png,.jpg,.jpeg,.svg,.mp4,.mov,.webm';
 
 type UploadStatus = 'idle' | 'uploading' | 'processing' | 'done' | 'error';
 

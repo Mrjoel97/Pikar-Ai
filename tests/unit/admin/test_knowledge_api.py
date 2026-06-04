@@ -15,13 +15,14 @@ Tests verify:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from starlette.requests import Request as StarletteRequest
 from starlette.testclient import TestClient
 
 # Patch targets
 _SERVICE_CLIENT_PATCH = "app.routers.admin.knowledge.get_service_client"
 _EXECUTE_ASYNC_PATCH = "app.routers.admin.knowledge.execute_async"
-_PROCESS_DOCUMENT_PATCH = "app.routers.admin.knowledge.knowledge_service.process_document"
+_PROCESS_DOCUMENT_PATCH = (
+    "app.routers.admin.knowledge.knowledge_service.process_document"
+)
 _PROCESS_IMAGE_PATCH = "app.routers.admin.knowledge.knowledge_service.process_image"
 _PROCESS_VIDEO_PATCH = "app.routers.admin.knowledge.knowledge_service.process_video"
 _GET_STATS_PATCH = "app.routers.admin.knowledge.knowledge_service.get_knowledge_stats"
@@ -98,7 +99,9 @@ async def test_upload_pdf():
     app = _make_app_with_router()
     app.dependency_overrides[_get_require_admin_dep()] = lambda: _build_fake_admin()
 
-    with patch(_PROCESS_DOCUMENT_PATCH, new_callable=AsyncMock, return_value=fake_result):
+    with patch(
+        _PROCESS_DOCUMENT_PATCH, new_callable=AsyncMock, return_value=fake_result
+    ):
         client = TestClient(app)
         response = client.post(
             "/admin/knowledge/upload",
@@ -113,23 +116,39 @@ async def test_upload_pdf():
 
 
 @pytest.mark.asyncio
-async def test_upload_xlsx():
-    """POST /admin/knowledge/upload should accept spreadsheet MIME types."""
+@pytest.mark.parametrize(
+    ("filename", "mime_type"),
+    [
+        (
+            "pipeline.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        ("legacy.xls", "application/vnd.ms-excel"),
+        (
+            "deck.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+    ],
+)
+async def test_upload_document_formats(filename: str, mime_type: str):
+    """POST /admin/knowledge/upload should accept richer document MIME types."""
     fake_result = {"entry_id": "entry-002", "chunk_count": 3, "status": "completed"}
 
     app = _make_app_with_router()
     app.dependency_overrides[_get_require_admin_dep()] = lambda: _build_fake_admin()
 
-    with patch(_PROCESS_DOCUMENT_PATCH, new_callable=AsyncMock, return_value=fake_result):
+    with patch(
+        _PROCESS_DOCUMENT_PATCH, new_callable=AsyncMock, return_value=fake_result
+    ):
         client = TestClient(app)
         response = client.post(
             "/admin/knowledge/upload",
             data={"uploaded_by": "admin@test.com"},
             files={
                 "file": (
-                    "pipeline.xlsx",
-                    b"PK fake xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    filename,
+                    b"document bytes",
+                    mime_type,
                 )
             },
         )
@@ -209,8 +228,18 @@ def _get_require_admin_dep():
 async def test_list_entries():
     """GET /admin/knowledge/entries returns paginated list of entries."""
     fake_entries = [
-        {"id": "e1", "filename": "doc1.pdf", "agent_scope": None, "status": "completed"},
-        {"id": "e2", "filename": "doc2.pdf", "agent_scope": "financial", "status": "completed"},
+        {
+            "id": "e1",
+            "filename": "doc1.pdf",
+            "agent_scope": None,
+            "status": "completed",
+        },
+        {
+            "id": "e2",
+            "filename": "doc2.pdf",
+            "agent_scope": "financial",
+            "status": "completed",
+        },
     ]
 
     app = _make_app_with_router()
@@ -241,7 +270,12 @@ async def test_list_entries():
 async def test_list_entries_filtered():
     """GET /admin/knowledge/entries?agent_scope=financial returns filtered list."""
     fake_entries = [
-        {"id": "e2", "filename": "doc2.pdf", "agent_scope": "financial", "status": "completed"},
+        {
+            "id": "e2",
+            "filename": "doc2.pdf",
+            "agent_scope": "financial",
+            "status": "completed",
+        },
     ]
 
     app = _make_app_with_router()
@@ -346,14 +380,16 @@ async def test_delete_entry():
 @pytest.mark.asyncio
 async def test_get_entry():
     """GET /admin/knowledge/entries/{entry_id} returns single entry details."""
-    fake_entry = [{
-        "id": "entry-001",
-        "filename": "report.pdf",
-        "file_type": "document",
-        "status": "completed",
-        "chunk_count": 8,
-        "agent_scope": None,
-    }]
+    fake_entry = [
+        {
+            "id": "entry-001",
+            "filename": "report.pdf",
+            "file_type": "document",
+            "status": "completed",
+            "chunk_count": 8,
+            "agent_scope": None,
+        }
+    ]
 
     app = _make_app_with_router()
     app.dependency_overrides[_get_require_admin_dep()] = lambda: _build_fake_admin()
@@ -422,9 +458,7 @@ async def test_upload_extraction_error_returns_400_with_actionable_message():
         response = client.post(
             "/admin/knowledge/upload",
             data={"uploaded_by": "admin@test.com"},
-            files={
-                "file": ("locked.pdf", b"%PDF-1.4 encrypted", "application/pdf")
-            },
+            files={"file": ("locked.pdf", b"%PDF-1.4 encrypted", "application/pdf")},
         )
 
     assert response.status_code == 400

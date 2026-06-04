@@ -3,31 +3,10 @@
 
 """Shared MIME-aware document text extraction for vault ingestion.
 
-This module centralises text extraction so both the user-facing Knowledge
-Vault (``app/routers/vault.py``) and the admin knowledge service
-(``app/services/knowledge_service.py``) can share the same truthful parsing
-behaviour instead of maintaining separate, weaker ad-hoc decoders.
-
-Exports:
-    extract_text_from_bytes — Extract text from file bytes by MIME type.
-                              Returns ``None`` for storage-only (non-searchable)
-                              formats; raises ``ExtractionError`` on parse failure.
-    is_searchable_format    — Return True when a MIME type maps to a format that
-                              can be embedded as searchable text.
-    ExtractionError         — Raised when extraction is attempted but fails.
-
-Searchable formats (at minimum for v7):
-    - text/plain
-    - text/markdown, text/x-markdown, text/md
-    - application/pdf                           (via pypdf)
-    - application/vnd.openxmlformats-officedocument.wordprocessingml.document
-                                                (via python-docx)
-    - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-                                                (via openpyxl)
-
-All other MIME types (image/*, video/*, audio/*, and unknown binary formats
-that do not resolve to text/PDF/DOCX/XLSX by MIME, filename, or OOXML sniffing)
-are treated as storage-only and return ``None``.
+The public API in this module is intentionally stable. Internally, supported
+documents are converted to Markdown through ``document_conversion`` so RAG
+ingestion preserves useful structure such as headings, tables, and slide
+boundaries.
 """
 
 from __future__ import annotations
@@ -36,49 +15,33 @@ import io
 import logging
 import os
 import zipfile
-from typing import Optional
+
+from app.services.document_conversion import (
+    DocumentConversionError,
+    convert_document_to_markdown,
+)
+from app.services.document_ocr import (
+    DocumentOcrError,
+    extract_text_with_gemini_vision,
+    is_ocr_candidate,
+)
+
+_PDF_MIME = "application/pdf"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_XLS_MIME = "application/vnd.ms-excel"
+_PPTX_MIME_PREFIX = "application/vnd.openxmlformats-officedocument.presentationml"
+_DOC_LEGACY_MIME = "application/msword"
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Lazy imports — keep module importable even if pypdf / docx are absent in
-# some environments.  The names are module-level so tests can patch them.
-# ---------------------------------------------------------------------------
 
-try:
-    import pypdf  # type: ignore[import]
-except ImportError:  # pragma: no cover
-    pypdf = None  # type: ignore[assignment]
+class ExtractionError(Exception):
+    """Raised when a supported format cannot be parsed."""
 
-try:
-    import docx  # type: ignore[import]
-except ImportError:  # pragma: no cover
-    docx = None  # type: ignore[assignment]
-
-try:
-    from openpyxl import load_workbook  # type: ignore[import]
-except ImportError:  # pragma: no cover
-    load_workbook = None  # type: ignore[assignment]
-
-# ---------------------------------------------------------------------------
-# Public contract
-# ---------------------------------------------------------------------------
-
-#: MIME types that can be embedded as searchable text
-_SEARCHABLE_MIMES: frozenset[str] = frozenset(
-    [
-        "text/plain",
-        "text/markdown",
-        "text/x-markdown",
-        "text/md",
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ]
-)
 
 _TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    [
+    {
         ".txt",
         ".md",
         ".markdown",
@@ -89,22 +52,45 @@ _TEXT_EXTENSIONS: frozenset[str] = frozenset(
         ".js",
         ".ts",
         ".html",
+        ".htm",
         ".css",
         ".sql",
         ".xml",
         ".yaml",
         ".yml",
-    ]
+    }
 )
 
-_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-_DOC_LEGACY_MIME = "application/msword"
-_XLS_LEGACY_MIME = "application/vnd.ms-excel"
+_DOCUMENT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".xls",
+        ".pptx",
+    }
+)
 
-
-class ExtractionError(Exception):
-    """Raised when a supported format cannot be parsed (e.g. corrupt file)."""
+_SEARCHABLE_MIMES: frozenset[str] = frozenset(
+    {
+        "application/csv",
+        "application/json",
+        "application/markdown",
+        "application/pdf",
+        "application/xml",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv",
+        "text/html",
+        "text/markdown",
+        "text/md",
+        "text/plain",
+        "text/tsv",
+        "text/x-markdown",
+        "text/xml",
+    }
+)
 
 
 def _normalise_mime(mime_type: str | None) -> str:
@@ -122,7 +108,7 @@ def _normalise_extension(filename: str | None) -> str:
 
 
 def _detect_ooxml_family(file_bytes: bytes) -> str | None:
-    """Return ``docx`` / ``xlsx`` when bytes look like an OOXML archive."""
+    """Return the OOXML family when bytes look like an Office archive."""
     if not file_bytes.startswith(b"PK"):
         return None
 
@@ -136,6 +122,8 @@ def _detect_ooxml_family(file_bytes: bytes) -> str | None:
         return "docx"
     if any(name.startswith("xl/") for name in names):
         return "xlsx"
+    if any(name.startswith("ppt/") for name in names):
+        return "pptx"
     return None
 
 
@@ -144,34 +132,41 @@ def _resolve_extraction_target(
     mime_type: str | None,
     filename: str | None,
 ) -> str | None:
-    """Resolve the best parser target for uploaded content."""
+    """Resolve the best converter target for uploaded content."""
     normalised = _normalise_mime(mime_type)
     extension = _normalise_extension(filename)
     ooxml_family = _detect_ooxml_family(file_bytes)
 
-    if normalised.startswith("text/") or extension in _TEXT_EXTENSIONS:
-        return "text"
-
-    if normalised == "application/pdf" or extension == ".pdf":
-        return "pdf"
-
-    if normalised == _DOCX_MIME or extension == ".docx":
-        return "docx"
-
-    if normalised == _XLSX_MIME or extension == ".xlsx":
-        return "xlsx"
-
-    if ooxml_family == "docx":
-        return "docx"
-
-    if ooxml_family == "xlsx":
-        return "xlsx"
-
     if normalised == _DOC_LEGACY_MIME or extension == ".doc":
         return "legacy-doc"
 
-    if normalised == _XLS_LEGACY_MIME or extension == ".xls":
-        return "legacy-xls"
+    if normalised == _XLS_MIME or extension == ".xls":
+        return "xls"
+
+    if normalised == _PDF_MIME or extension == ".pdf":
+        return "pdf"
+
+    if normalised == _DOCX_MIME or extension == ".docx" or ooxml_family == "docx":
+        return "docx"
+
+    if normalised == _XLSX_MIME or extension == ".xlsx" or ooxml_family == "xlsx":
+        return "xlsx"
+
+    if (
+        normalised.startswith(_PPTX_MIME_PREFIX)
+        or extension == ".pptx"
+        or ooxml_family == "pptx"
+    ):
+        return "pptx"
+
+    if is_ocr_candidate(normalised, filename):
+        return "ocr"
+
+    if normalised.startswith("text/") or extension in _TEXT_EXTENSIONS:
+        return "text"
+
+    if normalised in {"application/json", "application/xml", "application/csv"}:
+        return "text"
 
     return None
 
@@ -180,26 +175,21 @@ def is_searchable_format(
     mime_type: str | None,
     filename: str | None = None,
 ) -> bool:
-    """Return ``True`` when *mime_type* maps to a searchable text format.
-
-    Args:
-        mime_type: Raw MIME type string (may include charset suffix).
-        filename: Optional filename for extension-based fallback.
-
-    Returns:
-        ``True`` if the format can be embedded, ``False`` otherwise.
-    """
+    """Return ``True`` when a file can be embedded as searchable text."""
     normalised = _normalise_mime(mime_type)
     extension = _normalise_extension(filename)
 
-    if not normalised:
-        return extension in _TEXT_EXTENSIONS or extension in {".pdf", ".docx", ".xlsx"}
-    # Also accept any text/* sub-type
+    if extension == ".doc" or normalised == _DOC_LEGACY_MIME:
+        return False
+    if is_ocr_candidate(normalised, filename):
+        return True
+    if extension in _TEXT_EXTENSIONS or extension in _DOCUMENT_EXTENSIONS:
+        return True
     if normalised.startswith("text/"):
         return True
-    if normalised in _SEARCHABLE_MIMES:
+    if normalised.startswith(_PPTX_MIME_PREFIX):
         return True
-    return extension in _TEXT_EXTENSIONS or extension in {".pdf", ".docx", ".xlsx"}
+    return normalised in _SEARCHABLE_MIMES
 
 
 def extract_text_from_bytes(
@@ -207,22 +197,11 @@ def extract_text_from_bytes(
     mime_type: str | None,
     *,
     filename: str | None = None,
-) -> Optional[str]:
-    """Extract searchable text from raw file bytes.
+) -> str | None:
+    """Extract searchable Markdown/text from raw file bytes.
 
-    Args:
-        file_bytes: Raw binary content downloaded from storage.
-        mime_type: MIME type string for the file (may include charset suffix).
-        filename: Optional filename for extension-based fallback and clearer
-            parser selection when browsers upload files as generic binary blobs.
-
-    Returns:
-        Extracted text string (may be empty ``""`` if the file has no text),
-        or ``None`` if *mime_type* is not a searchable format (storage-only).
-
-    Raises:
-        ExtractionError: When the file is a supported searchable format but
-            parsing fails (e.g. corrupt PDF, truncated DOCX).
+    Returns ``None`` for storage-only formats and raises ``ExtractionError``
+    when a supported format cannot be parsed.
     """
     target = _resolve_extraction_target(file_bytes, mime_type, filename)
 
@@ -235,91 +214,41 @@ def extract_text_from_bytes(
             "Please upload a DOCX, PDF, or text export."
         )
 
-    if target == "legacy-xls":
-        raise ExtractionError(
-            "Legacy XLS extraction is not supported yet. "
-            "Please upload an XLSX or CSV export."
+    if target == "ocr":
+        try:
+            return extract_text_with_gemini_vision(
+                file_bytes,
+                mime_type,
+                filename=filename,
+            )
+        except DocumentOcrError as exc:
+            raise ExtractionError(f"OCR extraction failed: {exc}") from exc
+
+    try:
+        markdown = convert_document_to_markdown(
+            file_bytes,
+            mime_type,
+            filename=filename,
+        ).markdown
+    except DocumentConversionError as exc:
+        label = target.upper() if target != "text" else "text"
+        raise ExtractionError(f"{label} extraction failed: {exc}") from exc
+
+    if markdown.strip() or target != "pdf":
+        return markdown
+
+    try:
+        ocr_text = extract_text_with_gemini_vision(
+            file_bytes,
+            mime_type,
+            filename=filename,
         )
+    except DocumentOcrError as exc:
+        logger.warning(
+            "OCR fallback failed for %s after empty MarkItDown PDF output: %s",
+            filename or "<unnamed>",
+            exc,
+        )
+        return markdown
 
-    if target == "pdf":
-        return _extract_pdf(file_bytes)
-
-    if target == "docx":
-        return _extract_docx(file_bytes)
-
-    if target == "xlsx":
-        return _extract_xlsx(file_bytes)
-
-    return file_bytes.decode("utf-8", errors="replace")
-
-
-# ---------------------------------------------------------------------------
-# Internal extraction helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_pdf(file_bytes: bytes) -> str:
-    """Extract text from PDF bytes via pypdf.
-
-    Raises:
-        ExtractionError: On any pypdf parse failure.
-    """
-    if pypdf is None:  # pragma: no cover
-        raise ExtractionError("PDF extraction unavailable: pypdf not installed")
-    try:
-        reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-        parts: list[str] = []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                parts.append(text)
-        return "\n".join(parts)
-    except Exception as exc:
-        raise ExtractionError(f"PDF extraction failed: {exc}") from exc
-
-
-def _extract_docx(file_bytes: bytes) -> str:
-    """Extract text from DOCX bytes via python-docx.
-
-    Raises:
-        ExtractionError: On any python-docx parse failure.
-    """
-    if docx is None:  # pragma: no cover
-        raise ExtractionError("DOCX extraction unavailable: python-docx not installed")
-    try:
-        doc = docx.Document(io.BytesIO(file_bytes))
-        return "\n".join(p.text for p in doc.paragraphs if p.text)
-    except Exception as exc:
-        raise ExtractionError(f"DOCX extraction failed: {exc}") from exc
-
-
-def _extract_xlsx(file_bytes: bytes) -> str:
-    """Extract text-like tabular content from XLSX bytes via openpyxl."""
-    if load_workbook is None:  # pragma: no cover
-        raise ExtractionError("XLSX extraction unavailable: openpyxl not installed")
-
-    workbook = None
-    try:
-        workbook = load_workbook(io.BytesIO(file_bytes), data_only=False, read_only=True)
-        sheets: list[str] = []
-
-        for worksheet in workbook.worksheets:
-            rows: list[str] = []
-            for row in worksheet.iter_rows(values_only=True):
-                cells = [
-                    str(cell).strip()
-                    for cell in row
-                    if cell is not None and str(cell).strip()
-                ]
-                if cells:
-                    rows.append("\t".join(cells))
-
-            if rows:
-                sheets.append(f"[Sheet: {worksheet.title}]\n" + "\n".join(rows))
-
-        return "\n\n".join(sheets)
-    except Exception as exc:
-        raise ExtractionError(f"XLSX extraction failed: {exc}") from exc
-    finally:
-        if workbook is not None and hasattr(workbook, "close"):
-            workbook.close()
+    return ocr_text or markdown

@@ -4,24 +4,27 @@
 'use client';
 
 import React from 'react';
-import { Send, Layers, Mail, MessageSquare, X } from 'lucide-react';
+import { BrainCircuit, Send, Layers, Mail, MessageSquare, X } from 'lucide-react';
 import type { VaultActionId } from '@/lib/vaultActions';
 
 interface VaultActionBarProps {
     selectedCount: number;
+    showContinueIdea?: boolean;
     onAction: (action: VaultActionId) => void;
     onClear: () => void;
 }
 
 const CHIPS: Array<{ id: VaultActionId; label: string; icon: React.ReactNode }> = [
+    { id: 'continue_braindump', label: 'Continue idea', icon: <BrainCircuit size={14} /> },
     { id: 'post_social', label: 'Post to social', icon: <Send size={14} /> },
     { id: 'use_campaign', label: 'Use in campaign', icon: <Layers size={14} /> },
     { id: 'draft_email', label: 'Draft an email', icon: <Mail size={14} /> },
     { id: 'custom', label: 'Custom prompt', icon: <MessageSquare size={14} /> },
 ];
 
-export function VaultActionBar({ selectedCount, onAction, onClear }: VaultActionBarProps) {
+export function VaultActionBar({ selectedCount, showContinueIdea = false, onAction, onClear }: VaultActionBarProps) {
     if (selectedCount === 0) return null;
+    const visibleChips = CHIPS.filter((chip) => chip.id !== 'continue_braindump' || showContinueIdea);
 
     return (
         <div
@@ -37,7 +40,7 @@ export function VaultActionBar({ selectedCount, onAction, onClear }: VaultAction
                 Ask agent to:
             </span>
             <div className="flex items-center gap-2">
-                {CHIPS.map((chip) => (
+                {visibleChips.map((chip) => (
                     <button
                         key={chip.id}
                         type="button"

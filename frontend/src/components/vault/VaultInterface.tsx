@@ -52,6 +52,10 @@ import {
     mintPrefillSessionId,
     storeVaultPrefill,
 } from '@/lib/vaultPrefill';
+import {
+    downloadVaultStorageFile,
+    getVaultSignedUrl,
+} from '@/lib/vaultDownload';
 
 // Types
 interface VaultDocument {
@@ -134,6 +138,24 @@ function getInitialPreviewUrl(doc: Pick<VaultDocument, 'thumbnail_url' | 'file_u
     return undefined;
 }
 
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function isBrainDumpDocument(doc: Pick<VaultDocument, 'category' | 'file_type' | 'filename'>): boolean {
+    const category = doc.category ?? '';
+    return (
+        category === 'Brain Dump'
+        || category === 'Brain Dump Transcript'
+        || category === 'Brain Dump Analysis'
+        || category === 'Validation Plan'
+        || (
+            (doc.file_type === 'text/markdown' || doc.filename.toLowerCase().endsWith('.md'))
+            && category.toLowerCase().includes('brain')
+        )
+    );
+}
+
 
 interface TabConfig {
     id: string;
@@ -186,12 +208,22 @@ const TABS: TabConfig[] = [
 // These must stay in sync with app/services/document_text_extraction.py
 // ---------------------------------------------------------------------------
 
-const SEARCHABLE_EXTENSIONS = new Set(['pdf', 'txt', 'md', 'csv', 'docx', 'xlsx']);
-const SEARCHABLE_MIME_PREFIXES = ['text/'];
+const SEARCHABLE_EXTENSIONS = new Set([
+    'pdf', 'txt', 'md', 'csv', 'docx', 'xlsx', 'xls', 'pptx', 'html', 'htm', 'json', 'xml'
+]);
+const SEARCHABLE_MIME_PREFIXES = ['text/', 'image/'];
 const SEARCHABLE_MIMES = new Set([
+    'application/csv',
+    'application/markdown',
     'application/pdf',
+    'application/json',
+    'application/xml',
+    'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/html',
+    'text/xml',
 ]);
 
 /**
@@ -327,10 +359,10 @@ function UploadZone({
                             <span className="font-semibold text-teal-600">Click to upload</span> or drag and drop
                         </p>
                         <p className="text-xs text-slate-400 mt-1">
-                            Searchable: PDF, DOCX, XLSX, CSV, TXT, Markdown
+                            Searchable: PDF, Office docs, HTML, JSON, XML, CSV, TXT, Markdown
                         </p>
                         <p className="text-xs text-slate-300 mt-0.5">
-                            Storage-only: Images, Videos (not embedded)
+                            Image OCR is supported; videos are storage-only
                         </p>
                     </>
                 )}
@@ -340,7 +372,7 @@ function UploadZone({
                 className="hidden"
                 onChange={handleChange}
                 disabled={uploading}
-                accept=".pdf,.txt,.md,.doc,.docx,.csv,.xlsx,.json,.png,.jpg,.jpeg,.gif,.webp,.mp4,.webm"
+                accept=".pdf,.txt,.md,.doc,.docx,.csv,.xlsx,.xls,.pptx,.html,.htm,.json,.xml,.png,.jpg,.jpeg,.gif,.webp,.mp4,.webm"
             />
         </label>
     );
@@ -841,9 +873,15 @@ export function VaultInterface() {
                     id: d.id,
                     filename: d.filename,
                     file_type: d.file_type ?? null,
+                    category: d.category ?? null,
+                    file_path: d.file_path,
                     signed_url: d.preview_url ?? d.file_url ?? '',
                 }))
-                .filter((item) => item.signed_url);
+                .filter((item) => (
+                    action === 'continue_braindump'
+                        ? ['Brain Dump', 'Brain Dump Transcript', 'Brain Dump Analysis', 'Validation Plan'].includes(item.category ?? '')
+                        : item.signed_url || item.file_path
+                ));
 
             if (items.length === 0) return;
 
@@ -875,12 +913,13 @@ export function VaultInterface() {
 
         const path = doc.file_path;
         const bucket = getDocumentBucket(doc);
-        const { data: signed, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
-        if (error) {
-            console.warn('[Vault] Failed to create signed URL for view:', bucket, path, error.message);
+        let url = '';
+        try {
+            url = await getVaultSignedUrl({ bucket, path });
+        } catch (error) {
+            console.warn('[Vault] Failed to create signed URL for view:', bucket, path, error);
             return;
         }
-        const url = (signed as { signedUrl?: string; signedURL?: string })?.signedUrl ?? (signed as { signedURL?: string })?.signedURL;
         if (!url) return;
 
         const assetId = doc.id;
@@ -1225,53 +1264,60 @@ export function VaultInterface() {
                 return;
             }
 
-            const fileName = `${user.id}/${Date.now()}_${file.name}`;
             const accessToken = await getAccessToken({
                 timeoutMs: VAULT_AUTH_TIMEOUT_MS,
             }).catch(() => null);
+            if (!accessToken) {
+                alert('Please sign in to upload files');
+                return;
+            }
 
-            // Upload to storage
-            const { error: uploadError } = await supabase.storage
-                .from('knowledge-vault')
-                .upload(fileName, uploadFile);
+            const formData = new FormData();
+            formData.append('file', uploadFile);
 
-            if (uploadError) throw uploadError;
+            const response = await fetch('/api/upload/to-vault', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                },
+                body: formData,
+            });
 
-            // Create database record
-            const { error: dbError } = await supabase
-                .from('vault_documents')
-                .insert({
-                    user_id: user.id,
-                    filename: uploadFile.name,
-                    file_path: fileName,
-                    file_type: uploadFile.type || file.type || null,
-                    size_bytes: uploadFile.size,
-                    is_processed: false
-                });
+            if (!response.ok) {
+                const rawDetail = await response.text().catch(() => '');
+                let message = rawDetail || `Vault upload failed: ${response.status} ${response.statusText}`;
+                try {
+                    const parsed = JSON.parse(rawDetail) as { detail?: unknown; error?: unknown };
+                    const detail = parsed.detail ?? parsed.error;
+                    if (typeof detail === 'string') {
+                        message = detail;
+                    }
+                } catch {
+                    // Keep the raw upstream error text.
+                }
+                throw new Error(message);
+            }
 
-            if (dbError) throw dbError;
+            const uploadResult = await response.json() as {
+                file_path?: string;
+                processed?: boolean;
+                message?: string;
+            };
 
             // Refresh the list
             await fetchDocuments();
 
-            // Only trigger RAG processing for searchable formats.
-            // Images, videos, and other binary formats are storage-only and
-            // will not be embedded — the UI truthfully reflects this via DocumentStatusBadge.
-            if (isSearchableFileType(uploadFile.type, uploadFile.name)) {
-                void triggerDocumentProcessing(fileName, {
-                    accessToken,
-                    maxAttempts: 4,
-                    silent: false,
-                }).catch((err) => {
-                    console.error('[Vault] Processing request failed:', err);
-                    void fetchDocuments();
-                    alert('Document uploaded, but search processing could not be completed. Please try again.');
-                });
+            // /upload/to-vault runs storage upload + DB insert + searchable
+            // ingestion server-side with the service role. If ingestion was
+            // intentionally skipped for a binary format, surface the backend
+            // message without retrying the old browser-side /vault/process path.
+            if (uploadResult.processed === false && uploadResult.message) {
+                console.info('[Vault] Upload saved without search ingestion:', uploadResult.message);
             }
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Upload error:', error);
-            alert('Error uploading: ' + error.message);
+            alert('Error uploading: ' + getErrorMessage(error));
         } finally {
             setUploading(false);
         }
@@ -1286,31 +1332,14 @@ export function VaultInterface() {
             }
 
             const bucket = getDocumentBucket(doc);
-            const { data, error } = await supabase.storage
-                .from(bucket)
-                .createSignedUrl(doc.file_path, 60);
-
-            if (error) throw error;
-            const signedUrl = (data as { signedUrl?: string; signedURL?: string }).signedUrl
-                ?? (data as { signedURL?: string }).signedURL;
-            if (!signedUrl) throw new Error('No signed URL returned');
-
-            // Fetch the blob to avoid CORS download issues/prompting
-            const response = await fetch(signedUrl);
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-
-            // Create download link
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = doc.filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        } catch (error: any) {
+            await downloadVaultStorageFile({
+                bucket,
+                path: doc.file_path,
+                filename: doc.filename,
+            });
+        } catch (error: unknown) {
             console.error('Download error:', error);
-            alert('Error downloading: ' + error.message);
+            alert('Error downloading: ' + getErrorMessage(error));
         }
     };
 
@@ -1347,9 +1376,9 @@ export function VaultInterface() {
             }
 
             await fetchDocuments();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Delete error:', error);
-            alert('Error deleting: ' + error.message);
+            alert('Error deleting: ' + getErrorMessage(error));
         }
     };
 
@@ -1357,6 +1386,12 @@ export function VaultInterface() {
     const filteredDocuments = documents.filter(doc =>
         doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    const selectedDocuments = useMemo(
+        () => documents.filter((doc) => selectedIds.has(doc.id)),
+        [documents, selectedIds],
+    );
+    const selectedHasBrainDump = selectedDocuments.some(isBrainDumpDocument);
 
     const activeTabConfig = TABS.find(t => t.id === activeTab)!;
 
@@ -1548,6 +1583,7 @@ export function VaultInterface() {
             </AnimatePresence>
             <VaultActionBar
                 selectedCount={selectedIds.size}
+                showContinueIdea={selectedHasBrainDump}
                 onAction={handleVaultAction}
                 onClear={clearSelection}
             />

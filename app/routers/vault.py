@@ -17,7 +17,10 @@ from pydantic import BaseModel
 from app.middleware.rate_limiter import get_user_persona_limit, limiter
 from app.rag.knowledge_vault import ingest_document_content, search_knowledge
 from app.routers.onboarding import get_current_user_id
-from app.services.document_text_extraction import ExtractionError, extract_text_from_bytes
+from app.services.document_text_extraction import (
+    ExtractionError,
+    extract_text_from_bytes,
+)
 from app.services.supabase import get_service_client
 
 router = APIRouter(prefix="/vault", tags=["vault"])
@@ -377,7 +380,9 @@ async def search_vault(
     """Semantic search across the authenticated user's Knowledge Vault."""
     try:
         user_id = _resolve_user_id(current_user_id, body.user_id)
-        result = await search_knowledge(query=body.query, top_k=body.top_k, user_id=user_id)
+        result = await search_knowledge(
+            query=body.query, top_k=body.top_k, user_id=user_id
+        )
 
         if result.get("error"):
             return SearchResponse(results=[], query=body.query, error=result["error"])
@@ -486,7 +491,11 @@ async def process_document_for_rag(
             title=filename,
             document_type="uploaded_document",
             user_id=user_id,
-            metadata={"file_path": body.file_path},
+            metadata={
+                "file_path": body.file_path,
+                "content_format": "markdown",
+                "converter": "markitdown",
+            },
         )
 
         supabase.table("vault_documents").update(

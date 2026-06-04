@@ -47,17 +47,51 @@ async def add_business_knowledge(
             category="company_info"
         )
     """
-    from app.rag.knowledge_vault import ingest_brain_dump
+    from app.services.request_context import get_current_user_id
 
     # Build metadata
     metadata = {}
     if category:
         metadata["category"] = category
+    user_id = get_current_user_id()
 
     try:
-        result = await ingest_brain_dump(
-            content=content, title=title, metadata=metadata
-        )
+        if user_id:
+            from app.agents.tools.brain_dump import _save_to_vault
+
+            vault_result = await _save_to_vault(
+                content,
+                title,
+                category or "Business Knowledge",
+                user_id,
+                metadata={
+                    **metadata,
+                    "source": "executive_knowledge_tool",
+                    "title": title,
+                },
+            )
+            chunk_count = int(vault_result.get("embedding_count", 0) or 0)
+            if vault_result.get("processed"):
+                return {
+                    "success": True,
+                    "message": f"Successfully added '{title}' to Knowledge Vault. "
+                    f"Created {chunk_count} searchable chunks.",
+                    "chunk_count": chunk_count,
+                    "document_id": vault_result.get("doc_id"),
+                    "file_path": vault_result.get("file_path"),
+                    "user_scoped": True,
+                }
+            return {
+                "success": False,
+                "error": "Knowledge was saved but could not be made searchable.",
+                "document_id": vault_result.get("doc_id"),
+                "file_path": vault_result.get("file_path"),
+                "user_scoped": True,
+            }
+
+        from app.rag.knowledge_vault import ingest_brain_dump
+
+        result = await ingest_brain_dump(content=content, title=title, metadata=metadata)
 
         if result.get("success"):
             return {
@@ -66,6 +100,7 @@ async def add_business_knowledge(
                 f"Created {result.get('chunk_count', 0)} searchable chunks.",
                 "chunk_count": result.get("chunk_count", 0),
                 "embedding_ids": result.get("embedding_ids", []),
+                "user_scoped": bool(user_id),
             }
         else:
             return {
@@ -212,7 +247,7 @@ async def add_faq(question: str, answer: str) -> dict:
     )
 
 
-def list_knowledge() -> dict:
+async def list_knowledge() -> dict:
     """List all knowledge items in the Knowledge Vault.
 
     Use this tool to show the user what knowledge has been added.
@@ -220,10 +255,30 @@ def list_knowledge() -> dict:
     Returns:
         Dictionary with list of knowledge items.
     """
-    from app.rag.knowledge_vault import list_agent_content
+    from app.services.request_context import get_current_user_id
+    from app.services.supabase import get_service_client
+    from app.services.supabase_async import execute_async
 
     try:
-        items = list_agent_content(limit=50)
+        user_id = get_current_user_id()
+        if not user_id:
+            return {
+                "success": False,
+                "error": "No authenticated user context is available.",
+            }
+
+        client = get_service_client()
+        response = await execute_async(
+            client.table("vault_documents")
+            .select(
+                "id, filename, category, is_processed, embedding_count, created_at, metadata"
+            )
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(50),
+            op_name="knowledge_tools.list_knowledge",
+        )
+        items = response.data or []
 
         if not items:
             return {
@@ -235,11 +290,16 @@ def list_knowledge() -> dict:
         # Format for display
         formatted_items = []
         for item in items:
+            metadata = item.get("metadata") or {}
             formatted_items.append(
                 {
                     "id": item.get("id"),
-                    "title": item.get("metadata", {}).get("title", "Untitled"),
-                    "category": item.get("metadata", {}).get("category", "general"),
+                    "title": metadata.get("title") or item.get("filename") or "Untitled",
+                    "category": item.get("category")
+                    or metadata.get("category")
+                    or "general",
+                    "is_processed": item.get("is_processed"),
+                    "embedding_count": item.get("embedding_count") or 0,
                     "created_at": item.get("created_at"),
                 }
             )

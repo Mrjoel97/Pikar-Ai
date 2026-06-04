@@ -7,7 +7,7 @@ Provides backend operations for uploading, processing, and searching admin-manag
 training documents, images, and videos for the agent knowledge base.
 
 Exports:
-    process_document       — Extract + chunk + embed PDF/DOCX/XLSX/TXT/MD/CSV files
+    process_document       — Convert, chunk, and embed searchable document files
     process_image          — Generate Gemini vision description + embed image
     process_video          — Upload video + enqueue background transcription job
     process_video_transcript — Background worker: extract audio, transcribe, embed
@@ -132,7 +132,9 @@ async def process_document(
             file_bytes,
             {"content-type": mime_type or "application/octet-stream"},
         )
-    except Exception as exc:  # pragma: no cover - storage errors are non-fatal for text docs
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - storage errors are non-fatal for text docs
         logger.warning("Storage upload failed for %s: %s", filename, exc)
 
     # Embed via RAG ingestion pipeline (agent_id=None, user_id=None per RESEARCH.md Pitfall 1)
@@ -145,6 +147,8 @@ async def process_document(
             "scope": "system",
             "agent_scope": agent_scope,
             "filename": filename,
+            "content_format": "markdown",
+            "converter": "markitdown",
         },
         agent_id=None,
         user_id=None,
@@ -153,19 +157,21 @@ async def process_document(
 
     # Persist tracking entry
     await execute_async(
-        client.table("admin_knowledge_entries").insert({
-            "id": entry_id,
-            "filename": filename,
-            "file_type": "document",
-            "mime_type": mime_type,
-            "file_path": f"{entry_id}/{filename}",
-            "agent_scope": agent_scope,
-            "uploaded_by": uploaded_by,
-            "status": "completed",
-            "chunk_count": chunk_count,
-            "embedding_ids": embedding_ids,
-            "file_size_bytes": len(file_bytes),
-        })
+        client.table("admin_knowledge_entries").insert(
+            {
+                "id": entry_id,
+                "filename": filename,
+                "file_type": "document",
+                "mime_type": mime_type,
+                "file_path": f"{entry_id}/{filename}",
+                "agent_scope": agent_scope,
+                "uploaded_by": uploaded_by,
+                "status": "completed",
+                "chunk_count": chunk_count,
+                "embedding_ids": embedding_ids,
+                "file_size_bytes": len(file_bytes),
+            }
+        )
     )
 
     return {"entry_id": entry_id, "chunk_count": chunk_count, "status": "completed"}
@@ -212,7 +218,9 @@ async def process_image(
         response = genai_client.models.generate_content(
             model=_VISION_MODEL,
             contents=[
-                genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type or "image/jpeg"),
+                genai_types.Part.from_bytes(
+                    data=file_bytes, mime_type=mime_type or "image/jpeg"
+                ),
                 _VISION_PROMPT,
             ],
         )
@@ -226,37 +234,41 @@ async def process_image(
     embedding_id = str(uuid.uuid4())
 
     await execute_async(
-        client.table("embeddings").insert({
-            "id": embedding_id,
-            "user_id": None,
-            "agent_id": None,
-            "source_type": "admin_training_image",
-            "source_id": entry_id,
-            "content": description,
-            "embedding": embeddings[0] if embeddings else [],
-            "metadata": {
-                "scope": "system",
-                "agent_scope": agent_scope,
-                "filename": filename,
-            },
-        })
+        client.table("embeddings").insert(
+            {
+                "id": embedding_id,
+                "user_id": None,
+                "agent_id": None,
+                "source_type": "admin_training_image",
+                "source_id": entry_id,
+                "content": description,
+                "embedding": embeddings[0] if embeddings else [],
+                "metadata": {
+                    "scope": "system",
+                    "agent_scope": agent_scope,
+                    "filename": filename,
+                },
+            }
+        )
     )
 
     # Persist tracking entry
     await execute_async(
-        client.table("admin_knowledge_entries").insert({
-            "id": entry_id,
-            "filename": filename,
-            "file_type": "image",
-            "mime_type": mime_type,
-            "file_path": f"{entry_id}/{filename}",
-            "agent_scope": agent_scope,
-            "uploaded_by": uploaded_by,
-            "status": "completed",
-            "chunk_count": 1,
-            "embedding_ids": [embedding_id],
-            "file_size_bytes": len(file_bytes),
-        })
+        client.table("admin_knowledge_entries").insert(
+            {
+                "id": entry_id,
+                "filename": filename,
+                "file_type": "image",
+                "mime_type": mime_type,
+                "file_path": f"{entry_id}/{filename}",
+                "agent_scope": agent_scope,
+                "uploaded_by": uploaded_by,
+                "status": "completed",
+                "chunk_count": 1,
+                "embedding_ids": [embedding_id],
+                "file_size_bytes": len(file_bytes),
+            }
+        )
     )
 
     return {
@@ -306,33 +318,37 @@ async def process_video(
 
     # Insert tracking entry with status=processing
     await execute_async(
-        client.table("admin_knowledge_entries").insert({
-            "id": entry_id,
-            "filename": filename,
-            "file_type": "video",
-            "mime_type": mime_type,
-            "file_path": file_path,
-            "agent_scope": agent_scope,
-            "uploaded_by": uploaded_by,
-            "status": "processing",
-            "chunk_count": 0,
-            "embedding_ids": [],
-            "file_size_bytes": len(file_bytes),
-        })
+        client.table("admin_knowledge_entries").insert(
+            {
+                "id": entry_id,
+                "filename": filename,
+                "file_type": "video",
+                "mime_type": mime_type,
+                "file_path": file_path,
+                "agent_scope": agent_scope,
+                "uploaded_by": uploaded_by,
+                "status": "processing",
+                "chunk_count": 0,
+                "embedding_ids": [],
+                "file_size_bytes": len(file_bytes),
+            }
+        )
     )
 
     # Enqueue background job
     await execute_async(
-        client.table("ai_jobs").insert({
-            "job_type": "admin_knowledge_video",
-            "status": "pending",
-            "input_data": {
-                "entry_id": entry_id,
-                "file_path": file_path,
-                "agent_scope": agent_scope,
-                "mime_type": mime_type,
-            },
-        })
+        client.table("ai_jobs").insert(
+            {
+                "job_type": "admin_knowledge_video",
+                "status": "pending",
+                "input_data": {
+                    "entry_id": entry_id,
+                    "file_path": file_path,
+                    "agent_scope": agent_scope,
+                    "mime_type": mime_type,
+                },
+            }
+        )
     )
 
     return {
@@ -392,10 +408,15 @@ async def process_video_transcript(
 
         # Handle empty transcript gracefully
         if not transcript.strip():
-            logger.info("No speech detected in video %s — marking completed with 0 chunks", entry_id)
+            logger.info(
+                "No speech detected in video %s — marking completed with 0 chunks",
+                entry_id,
+            )
             await execute_async(
                 client.table("admin_knowledge_entries")
-                .update({"status": "completed", "chunk_count": 0, "updated_at": "now()"})
+                .update(
+                    {"status": "completed", "chunk_count": 0, "updated_at": "now()"}
+                )
                 .eq("id", entry_id)
             )
             return {
@@ -425,12 +446,14 @@ async def process_video_transcript(
         # Update tracking entry to completed
         await execute_async(
             client.table("admin_knowledge_entries")
-            .update({
-                "status": "completed",
-                "chunk_count": chunk_count,
-                "embedding_ids": embedding_ids,
-                "updated_at": "now()",
-            })
+            .update(
+                {
+                    "status": "completed",
+                    "chunk_count": chunk_count,
+                    "embedding_ids": embedding_ids,
+                    "updated_at": "now()",
+                }
+            )
             .eq("id", entry_id)
         )
 
@@ -442,16 +465,23 @@ async def process_video_transcript(
         }
 
     except Exception as exc:
-        logger.error("Video transcript processing failed for entry %s: %s", entry_id, exc, exc_info=True)
+        logger.error(
+            "Video transcript processing failed for entry %s: %s",
+            entry_id,
+            exc,
+            exc_info=True,
+        )
         # Update entry to failed so UI reflects the error
         try:
             await execute_async(
                 client.table("admin_knowledge_entries")
-                .update({
-                    "status": "failed",
-                    "error_message": str(exc),
-                    "updated_at": "now()",
-                })
+                .update(
+                    {
+                        "status": "failed",
+                        "error_message": str(exc),
+                        "updated_at": "now()",
+                    }
+                )
                 .eq("id", entry_id)
             )
         except Exception as update_exc:  # pragma: no cover
@@ -545,19 +575,21 @@ async def add_document(
         user_id=str(user_id),
     )
     await execute_async(
-        client.table("admin_knowledge_entries").insert({
-            "id": str(entry_id),
-            "filename": title,
-            "file_type": "agent_artifact",
-            "mime_type": "text/markdown",
-            "file_path": f"agent_reports/{entry_id}.md",
-            "agent_scope": agent_id,
-            "uploaded_by": str(user_id),
-            "status": "completed",
-            "chunk_count": len(embedding_ids),
-            "embedding_ids": embedding_ids,
-            "file_size_bytes": len(content.encode("utf-8")),
-        })
+        client.table("admin_knowledge_entries").insert(
+            {
+                "id": str(entry_id),
+                "filename": title,
+                "file_type": "agent_artifact",
+                "mime_type": "text/markdown",
+                "file_path": f"agent_reports/{entry_id}.md",
+                "agent_scope": agent_id,
+                "uploaded_by": str(user_id),
+                "status": "completed",
+                "chunk_count": len(embedding_ids),
+                "embedding_ids": embedding_ids,
+                "file_size_bytes": len(content.encode("utf-8")),
+            }
+        )
     )
     return entry_id
 
@@ -572,8 +604,9 @@ async def get_knowledge_stats() -> dict[str, Any]:
     client = get_service_client()
 
     result = await execute_async(
-        client.table("admin_knowledge_entries")
-        .select("id, agent_scope, chunk_count, file_size_bytes")
+        client.table("admin_knowledge_entries").select(
+            "id, agent_scope, chunk_count, file_size_bytes"
+        )
     )
     rows = result.data or []
 

@@ -4,11 +4,15 @@
 const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
   csv: 'text/csv',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  html: 'text/html',
   json: 'application/json',
   md: 'text/markdown',
   pdf: 'application/pdf',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   txt: 'text/plain',
+  xls: 'application/vnd.ms-excel',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xml: 'text/xml',
 }
 
 const PROCESS_RETRY_DELAYS_MS = [1500, 3000, 5000, 8000] as const

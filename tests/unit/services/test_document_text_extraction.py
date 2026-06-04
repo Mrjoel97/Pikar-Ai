@@ -1,40 +1,23 @@
 # Copyright (c) 2024-2026 Pikar AI. All rights reserved.
 # Proprietary and confidential. See LICENSE file for details.
 
-"""Unit tests for document_text_extraction shared helper.
-
-Covers:
-- extract_text_from_bytes for plain text, markdown, PDF, DOCX, XLSX
-- Unsupported / non-extractable format behavior (returns storage-only signal)
-- Extraction failure handling (e.g. corrupt PDF bytes)
-"""
+"""Unit tests for the shared document extraction boundary."""
 
 from __future__ import annotations
 
 import io
 import zipfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Helpers for building minimal fixture bytes
-# ---------------------------------------------------------------------------
-
-
-def _make_pdf_bytes(text: str = "Hello PDF world") -> bytes:
-    """Return minimal valid PDF bytes containing *text* via pypdf mock."""
-    return b"%PDF-1.4 fake-pdf-bytes-for-testing"
-
-
-def _make_docx_bytes(text: str = "Hello DOCX world") -> bytes:
-    """Return placeholder bytes; actual parsing is mocked."""
-    return b"PK\x03\x04fake-docx-bytes-for-testing"
+from app.services.document_conversion import (
+    DocumentConversionError,
+    DocumentConversionResult,
+)
 
 
 def _make_ooxml_bytes(folder: str) -> bytes:
-    """Return minimal OOXML-like zip bytes for extension/MIME fallback tests."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types />")
@@ -42,274 +25,214 @@ def _make_ooxml_bytes(folder: str) -> bytes:
     return buf.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# Tests: extract_text_from_bytes
-# ---------------------------------------------------------------------------
+def _mock_markdown(markdown: str = "# Extracted\n\nBody") -> DocumentConversionResult:
+    return DocumentConversionResult(markdown=markdown)
 
 
 class TestExtractTextFromBytes:
-    """Tests for the public extract_text_from_bytes entry-point."""
-
-    def test_plain_text_utf8(self):
+    def test_supported_text_routes_to_markitdown_stream_adapter(self):
         from app.services.document_text_extraction import extract_text_from_bytes
 
-        content = "Hello, plain text world!"
-        result = extract_text_from_bytes(content.encode("utf-8"), "text/plain")
-        assert "Hello, plain text world!" in result
-        assert result.strip() != ""
+        with patch(
+            "app.services.document_text_extraction.convert_document_to_markdown",
+            return_value=_mock_markdown("Hello, plain text world!"),
+        ) as convert:
+            result = extract_text_from_bytes(b"Hello, plain text world!", "text/plain")
 
-    def test_markdown_text(self):
-        from app.services.document_text_extraction import extract_text_from_bytes
+        assert result == "Hello, plain text world!"
+        convert.assert_called_once_with(
+            b"Hello, plain text world!",
+            "text/plain",
+            filename=None,
+        )
 
-        md = "# Title\n\nSome **bold** paragraph."
-        result = extract_text_from_bytes(md.encode("utf-8"), "text/markdown")
-        assert "Title" in result
-        assert "paragraph" in result
-
-    def test_markdown_x_mime(self):
-        from app.services.document_text_extraction import extract_text_from_bytes
-
-        md = "# Heading\nContent here"
-        result = extract_text_from_bytes(md.encode("utf-8"), "text/x-markdown")
-        assert "Heading" in result
-
-    def test_pdf_extraction(self):
-        """PDF bytes should be routed through pypdf extraction."""
-        from app.services.document_text_extraction import extract_text_from_bytes
-
-        mock_page = MagicMock()
-        mock_page.extract_text.return_value = "Extracted PDF content"
-        mock_reader = MagicMock()
-        mock_reader.pages = [mock_page]
-
-        with patch("app.services.document_text_extraction.pypdf") as mock_pypdf:
-            mock_pypdf.PdfReader.return_value = mock_reader
-            result = extract_text_from_bytes(b"fake-pdf", "application/pdf")
-
-        assert "Extracted PDF content" in result
-        mock_pypdf.PdfReader.assert_called_once()
-
-    def test_docx_extraction(self):
-        """DOCX bytes should be routed through python-docx extraction."""
-        from app.services.document_text_extraction import extract_text_from_bytes
-
-        mock_para = MagicMock()
-        mock_para.text = "DOCX paragraph content"
-        mock_doc = MagicMock()
-        mock_doc.paragraphs = [mock_para]
-
-        with patch("app.services.document_text_extraction.docx") as mock_docx:
-            mock_docx.Document.return_value = mock_doc
-            result = extract_text_from_bytes(b"fake-docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-        assert "DOCX paragraph content" in result
-        mock_docx.Document.assert_called_once()
-
-    def test_xlsx_extraction(self):
-        """XLSX bytes should be routed through openpyxl extraction."""
-        from app.services.document_text_extraction import extract_text_from_bytes
-
-        mock_sheet = MagicMock()
-        mock_sheet.title = "Revenue"
-        mock_sheet.iter_rows.return_value = [
-            ("Quarter", "Revenue"),
-            ("Q1", 1200),
-            ("Q2", 1450),
-        ]
-        mock_workbook = MagicMock()
-        mock_workbook.worksheets = [mock_sheet]
-
-        with patch("app.services.document_text_extraction.load_workbook", return_value=mock_workbook):
-            result = extract_text_from_bytes(
-                b"fake-xlsx",
+    @pytest.mark.parametrize(
+        ("filename", "mime_type"),
+        [
+            ("report.pdf", "application/pdf"),
+            (
+                "contract.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                "pipeline.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            ("legacy.xls", "application/vnd.ms-excel"),
+            (
+                "deck.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ),
+            ("page.html", "text/html"),
+            ("data.json", "application/json"),
+            ("feed.xml", "application/xml"),
+        ],
+    )
+    def test_supported_document_types_route_to_markitdown(
+        self, filename: str, mime_type: str
+    ):
+        from app.services.document_text_extraction import extract_text_from_bytes
+
+        with patch(
+            "app.services.document_text_extraction.convert_document_to_markdown",
+            return_value=_mock_markdown("Converted markdown"),
+        ) as convert:
+            result = extract_text_from_bytes(
+                b"document-bytes", mime_type, filename=filename
             )
 
-        assert "[Sheet: Revenue]" in result
-        assert "Quarter\tRevenue" in result
-        assert "Q1\t1200" in result
-        mock_workbook.close.assert_called_once()
+        assert result == "Converted markdown"
+        convert.assert_called_once_with(b"document-bytes", mime_type, filename=filename)
 
     def test_octet_stream_docx_filename_fallback(self):
-        """Generic binary uploads should still parse DOCX when filename is present."""
         from app.services.document_text_extraction import extract_text_from_bytes
 
-        mock_para = MagicMock()
-        mock_para.text = "Fallback DOCX paragraph"
-        mock_doc = MagicMock()
-        mock_doc.paragraphs = [mock_para]
-
-        with patch("app.services.document_text_extraction.docx") as mock_docx:
-            mock_docx.Document.return_value = mock_doc
+        with patch(
+            "app.services.document_text_extraction.convert_document_to_markdown",
+            return_value=_mock_markdown("DOCX fallback"),
+        ):
             result = extract_text_from_bytes(
                 b"fake-docx",
                 "application/octet-stream",
                 filename="contract.docx",
             )
 
-        assert "Fallback DOCX paragraph" in result
-        mock_docx.Document.assert_called_once()
+        assert result == "DOCX fallback"
 
-    def test_ms_excel_mime_uses_ooxml_detection_when_xlsx_bytes(self):
-        """Mislabeled XLSX uploads should still parse when bytes are OOXML."""
+    def test_ooxml_pptx_bytes_route_to_converter_even_with_generic_name(self):
         from app.services.document_text_extraction import extract_text_from_bytes
 
-        mock_sheet = MagicMock()
-        mock_sheet.title = "Leads"
-        mock_sheet.iter_rows.return_value = [("Name", "Email"), ("Ada", "ada@example.com")]
-        mock_workbook = MagicMock()
-        mock_workbook.worksheets = [mock_sheet]
-
-        with patch("app.services.document_text_extraction.load_workbook", return_value=mock_workbook):
+        pptx_bytes = _make_ooxml_bytes("ppt")
+        with patch(
+            "app.services.document_text_extraction.convert_document_to_markdown",
+            return_value=_mock_markdown("Slide text"),
+        ) as convert:
             result = extract_text_from_bytes(
-                _make_ooxml_bytes("xl"),
-                "application/vnd.ms-excel",
-                filename="pipeline.xls",
+                pptx_bytes,
+                "application/octet-stream",
+                filename="upload",
             )
 
-        assert "[Sheet: Leads]" in result
-        assert "Ada\tada@example.com" in result
-        mock_workbook.close.assert_called_once()
+        assert result == "Slide text"
+        convert.assert_called_once_with(
+            pptx_bytes,
+            "application/octet-stream",
+            filename="upload",
+        )
 
-    def test_unsupported_mime_returns_storage_only(self):
-        """Unsupported MIME types should return None (storage-only)."""
+    def test_image_routes_to_gemini_ocr(self):
         from app.services.document_text_extraction import extract_text_from_bytes
 
-        result = extract_text_from_bytes(b"\x00\x01\x02binary", "image/png")
-        assert result is None
+        with patch(
+            "app.services.document_text_extraction.extract_text_with_gemini_vision",
+            return_value="OCR image text",
+        ) as ocr:
+            result = extract_text_from_bytes(
+                b"\x89PNG\r\nimage-bytes",
+                "image/png",
+                filename="scan.png",
+            )
+
+        assert result == "OCR image text"
+        ocr.assert_called_once_with(
+            b"\x89PNG\r\nimage-bytes",
+            "image/png",
+            filename="scan.png",
+        )
 
     def test_unsupported_video_returns_storage_only(self):
         from app.services.document_text_extraction import extract_text_from_bytes
 
-        result = extract_text_from_bytes(b"fake-video-bytes", "video/mp4")
-        assert result is None
+        assert extract_text_from_bytes(b"fake-video-bytes", "video/mp4") is None
 
-    def test_corrupt_pdf_raises_extraction_error(self):
-        """Corrupt PDF bytes should raise ExtractionError."""
-        from app.services.document_text_extraction import (
-            ExtractionError,
-            extract_text_from_bytes,
-        )
+    def test_empty_pdf_markitdown_output_falls_back_to_ocr(self):
+        from app.services.document_text_extraction import extract_text_from_bytes
 
-        with patch("app.services.document_text_extraction.pypdf") as mock_pypdf:
-            mock_pypdf.PdfReader.side_effect = Exception("malformed PDF")
-            with pytest.raises(ExtractionError, match="PDF"):
-                extract_text_from_bytes(b"bad-pdf-bytes", "application/pdf")
-
-    def test_corrupt_docx_raises_extraction_error(self):
-        """Corrupt DOCX bytes should raise ExtractionError."""
-        from app.services.document_text_extraction import (
-            ExtractionError,
-            extract_text_from_bytes,
-        )
-
-        with patch("app.services.document_text_extraction.docx") as mock_docx:
-            mock_docx.Document.side_effect = Exception("bad zip")
-            with pytest.raises(ExtractionError, match="DOCX"):
-                extract_text_from_bytes(b"bad-docx-bytes", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-    def test_legacy_xls_raises_clear_error(self):
-        """Legacy XLS uploads should raise a helpful conversion error."""
-        from app.services.document_text_extraction import (
-            ExtractionError,
-            extract_text_from_bytes,
-        )
-
-        with pytest.raises(ExtractionError, match="XLSX or CSV"):
-            extract_text_from_bytes(
-                b"\xd0\xcf\x11\xe0legacy-xls",
-                "application/vnd.ms-excel",
-                filename="forecast.xls",
+        with (
+            patch(
+                "app.services.document_text_extraction.convert_document_to_markdown",
+                return_value=_mock_markdown(""),
+            ) as convert,
+            patch(
+                "app.services.document_text_extraction.extract_text_with_gemini_vision",
+                return_value="Scanned PDF text",
+            ) as ocr,
+        ):
+            result = extract_text_from_bytes(
+                b"%PDF scanned",
+                "application/pdf",
+                filename="scan.pdf",
             )
 
-    def test_text_mime_with_utf8_errors_uses_replace(self):
-        """Text MIME with non-UTF-8 bytes should decode with replace rather than raise."""
-        from app.services.document_text_extraction import extract_text_from_bytes
+        assert result == "Scanned PDF text"
+        convert.assert_called_once()
+        ocr.assert_called_once_with(
+            b"%PDF scanned",
+            "application/pdf",
+            filename="scan.pdf",
+        )
 
-        # latin-1 byte in a text/plain blob
-        result = extract_text_from_bytes(b"caf\xe9", "text/plain")
-        assert result is not None
-        assert "caf" in result
+    def test_legacy_doc_raises_clear_error(self):
+        from app.services.document_text_extraction import (
+            ExtractionError,
+            extract_text_from_bytes,
+        )
 
-    def test_pdf_with_empty_pages_returns_empty_string(self):
-        """PDF with no extractable text should return empty string, not None."""
-        from app.services.document_text_extraction import extract_text_from_bytes
+        with pytest.raises(ExtractionError, match="Legacy DOC extraction"):
+            extract_text_from_bytes(
+                b"\xd0\xcf\x11\xe0legacy-doc",
+                "application/msword",
+                filename="proposal.doc",
+            )
 
-        mock_page = MagicMock()
-        mock_page.extract_text.return_value = ""
-        mock_reader = MagicMock()
-        mock_reader.pages = [mock_page]
+    def test_conversion_error_is_wrapped_as_extraction_error(self):
+        from app.services.document_text_extraction import (
+            ExtractionError,
+            extract_text_from_bytes,
+        )
 
-        with patch("app.services.document_text_extraction.pypdf") as mock_pypdf:
-            mock_pypdf.PdfReader.return_value = mock_reader
-            result = extract_text_from_bytes(b"pdf-no-text", "application/pdf")
-
-        # Returns empty string (not None): PDF was searchable format but yielded no text
-        assert result == ""
-
-    def test_mime_with_charset_suffix_stripped(self):
-        """MIME types like 'text/plain; charset=utf-8' should be handled correctly."""
-        from app.services.document_text_extraction import extract_text_from_bytes
-
-        result = extract_text_from_bytes(b"Hello charset", "text/plain; charset=utf-8")
-        assert result is not None
-        assert "Hello charset" in result
+        with patch(
+            "app.services.document_text_extraction.convert_document_to_markdown",
+            side_effect=DocumentConversionError("malformed PDF"),
+        ):
+            with pytest.raises(ExtractionError, match="PDF extraction failed"):
+                extract_text_from_bytes(b"bad-pdf-bytes", "application/pdf")
 
 
 class TestIsSearchableFormat:
-    """Tests for the is_searchable_format helper."""
-
-    def test_pdf_is_searchable(self):
+    @pytest.mark.parametrize(
+        "mime_type",
+        [
+            "application/pdf",
+            "application/json",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/xml",
+            "image/png",
+            "text/html",
+            "text/markdown",
+            "text/plain",
+            "text/xml",
+        ],
+    )
+    def test_supported_mimes_are_searchable(self, mime_type: str):
         from app.services.document_text_extraction import is_searchable_format
 
-        assert is_searchable_format("application/pdf") is True
+        assert is_searchable_format(mime_type) is True
 
-    def test_docx_is_searchable(self):
+    @pytest.mark.parametrize("mime_type", ["video/mp4", "", None])
+    def test_storage_only_mimes_are_not_searchable(self, mime_type: str | None):
         from app.services.document_text_extraction import is_searchable_format
 
-        assert is_searchable_format(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ) is True
-
-    def test_xlsx_is_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ) is True
-
-    def test_plain_text_is_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format("text/plain") is True
-
-    def test_markdown_is_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format("text/markdown") is True
-
-    def test_image_not_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format("image/png") is False
-
-    def test_video_not_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format("video/mp4") is False
-
-    def test_empty_mime_not_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format("") is False
-
-    def test_none_mime_not_searchable(self):
-        from app.services.document_text_extraction import is_searchable_format
-
-        assert is_searchable_format(None) is False  # type: ignore[arg-type]
+        assert is_searchable_format(mime_type) is False
 
     def test_filename_extension_fallback_is_searchable(self):
         from app.services.document_text_extraction import is_searchable_format
 
-        assert is_searchable_format("application/octet-stream", filename="notes.docx") is True
-        assert is_searchable_format("application/octet-stream", filename="table.xlsx") is True
+        assert is_searchable_format("application/octet-stream", filename="notes.docx")
+        assert is_searchable_format("application/octet-stream", filename="table.xlsx")
+        assert is_searchable_format("application/octet-stream", filename="slides.pptx")
+        assert is_searchable_format("application/octet-stream", filename="old.xls")
+        assert not is_searchable_format("application/octet-stream", filename="old.doc")

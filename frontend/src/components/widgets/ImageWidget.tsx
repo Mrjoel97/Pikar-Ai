@@ -19,6 +19,8 @@ export interface ImageWidgetData {
   imageUrl: string;
   prompt?: string;
   asset_id?: string;
+  bucket_id?: string;
+  file_path?: string;
   caption?: string;
 }
 
@@ -112,24 +114,45 @@ export default function ImageWidget({ definition }: WidgetProps) {
         try {
           const supabase = createClient();
 
-          // 1. Get the latest file_path from media_assets table
-          //    The URL might be expired, but the path in DB is source of truth.
+          // 1. Get the latest storage location from media_assets. The signed
+          // URL might be expired, but bucket_id + file_path are the source of truth.
           const { data: assetData, error: assetError } = await supabase
             .from('media_assets')
-            .select('file_path')
+            .select('bucket_id,file_path,file_url')
             .eq('id', data.asset_id)
             .single();
 
-          if (assetError || !assetData?.file_path) {
+          if (assetError || !assetData) {
             console.error('Failed to find media asset:', assetError);
+            return;
+          }
+
+          const storedUrl = typeof assetData.file_url === 'string' ? assetData.file_url : null;
+          if (storedUrl && (storedUrl.startsWith('http') || storedUrl.startsWith('data:'))) {
+            setCurrentUrl(storedUrl);
+            setLoadError(false);
+            return;
+          }
+
+          const bucketId =
+            typeof assetData.bucket_id === 'string' && assetData.bucket_id
+              ? assetData.bucket_id
+              : data.bucket_id || 'knowledge-vault';
+          const filePath =
+            typeof assetData.file_path === 'string' && assetData.file_path
+              ? assetData.file_path
+              : data.file_path;
+
+          if (!filePath) {
+            console.error('Media asset has no storage path:', assetData);
             return;
           }
 
           // 2. Generate a new signed URL
           const { data: signData, error: signError } = await supabase
             .storage
-            .from('knowledge-vault')
-            .createSignedUrl(assetData.file_path, 3600); // 1 hour validity
+            .from(bucketId)
+            .createSignedUrl(filePath, 3600); // 1 hour validity
 
           if (signError || !signData?.signedUrl) {
             console.error('Failed to sign URL:', signError);
@@ -148,7 +171,7 @@ export default function ImageWidget({ definition }: WidgetProps) {
 
       refreshUrl();
     }
-  }, [currentUrl, loadError, data?.asset_id, isRefreshing]);
+  }, [currentUrl, loadError, data?.asset_id, data?.bucket_id, data?.file_path, isRefreshing]);
 
   // If we are actively refreshing, show a loading state
   if (isRefreshing) {

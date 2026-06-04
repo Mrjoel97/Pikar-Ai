@@ -12,6 +12,15 @@ const items: VaultActionItem[] = [
     { id: 'a1', filename: 'hero.png', file_type: 'image/png', signed_url: 'https://x/a' },
     { id: 'a2', filename: 'demo.mp4', file_type: 'video/mp4', signed_url: 'https://x/b' },
 ]
+const brainDumpItems: VaultActionItem[] = [
+    {
+        id: 'brain-1',
+        filename: 'brain_dump_transcript.md',
+        file_type: 'text/markdown',
+        category: 'Brain Dump Transcript',
+        file_path: 'user-1/brain_dump_transcript.md',
+    },
+]
 
 describe('buildVaultActionPrompt', () => {
     it('builds a post-to-social prompt that lists every asset with filename and URL', () => {
@@ -41,6 +50,14 @@ describe('buildVaultActionPrompt', () => {
         expect(prompt).toContain('https://x/a')
         expect(prompt.toLowerCase()).not.toContain('post these assets')
         expect(prompt.toLowerCase()).not.toContain('marketing campaign')
+    })
+
+    it('builds a continue-braindump prompt that tells the agent to retrieve exact markdown by id', () => {
+        const prompt = buildVaultActionPrompt('continue_braindump', brainDumpItems)
+        expect(prompt).toContain('get_braindump_document')
+        expect(prompt).toContain('vault_document_id=brain-1')
+        expect(prompt).toContain('brain_dump_transcript.md')
+        expect(prompt).toContain('file_path=user-1/brain_dump_transcript.md')
     })
 
     it('throws on unknown action', () => {

@@ -436,14 +436,18 @@ export interface CampaignHubData {
 }
 
 /**
- * Data structure for the Document Widget (PDF, PPTX, CSV downloads)
+ * Data structure for the Document Widget (downloads and cloud documents)
  */
 export interface DocumentWidgetData {
-    documentUrl: string;
-    title: string;
-    fileType: 'pdf' | 'pptx' | 'csv' | 'xlsx';
-    sizeBytes: number;
+    documentUrl?: string;
+    title?: string;
+    fileType?: string;
+    sizeBytes?: number;
     templateName?: string;
+    url?: string;
+    doc_id?: string;
+    form_id?: string;
+    kind?: string;
 }
 
 /**
@@ -826,7 +830,10 @@ export function validateWidgetDefinition(widget: unknown): widget is WidgetDefin
         case 'app_builder_launcher': return typeof (w.data as Record<string, unknown>)?.targetPath === 'string';
         case 'app_builder_canvas': return typeof (w.data as Record<string, unknown>)?.targetPath === 'string';
         case 'campaign_hub': return true;
-        case 'document': return typeof (w.data as Record<string, unknown>)?.documentUrl === 'string';
+        case 'document': {
+            const data = w.data as Record<string, unknown>;
+            return typeof data?.documentUrl === 'string' || typeof data?.url === 'string';
+        }
         case 'director_storyboard': return Array.isArray((w.data as Record<string, unknown>)?.captions);
         case 'approval': {
             const d = w.data as Record<string, unknown>;
