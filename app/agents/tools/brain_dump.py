@@ -255,8 +255,14 @@ Format your response in Markdown.
 
 
 async def _save_to_vault(
-    content: str, title: str, doc_type: str, user_id: str
-) -> dict[str, str | None]:
+    content: str,
+    title: str,
+    doc_type: str,
+    user_id: str,
+    *,
+    ingest: bool = True,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Save content to Knowledge Vault storage and DB.
 
     Returns:
@@ -271,6 +277,8 @@ async def _save_to_vault(
         supabase = get_service_client()
         filename = f"{title.replace(' ', '_').lower()}_{int(time.time())}.md"
         file_path = f"{user_id}/{filename}"
+        embedding_count = 0
+        processed = False
 
         # 1. Upload to Storage
         supabase.storage.from_("knowledge-vault").upload(
@@ -280,38 +288,100 @@ async def _save_to_vault(
         )
 
         # 2. Insert into vault_documents and capture the generated ID
-        insert_result = (
-            supabase.table("vault_documents")
-            .insert(
-                {
-                    "user_id": user_id,
-                    "filename": filename,
-                    "file_path": file_path,
-                    "file_type": "text/markdown",
-                    "size_bytes": len(content),
-                    "category": doc_type,
-                    "is_processed": True,
-                }
-            )
-            .execute()
-        )
+        base_metadata = {
+            **(metadata or {}),
+            "file_path": file_path,
+        }
+        row: dict[str, Any] = {
+            "user_id": user_id,
+            "filename": filename,
+            "file_path": file_path,
+            "file_type": "text/markdown",
+            "size_bytes": len(content),
+            "category": doc_type,
+            "is_processed": False,
+            "embedding_count": 0,
+            "metadata": {
+                **base_metadata,
+                "processing_status": "processing" if ingest else "pending_ingestion",
+            },
+        }
+
+        insert_result = supabase.table("vault_documents").insert(row).execute()
         doc_id: str | None = None
         if insert_result.data and len(insert_result.data) > 0:
             doc_id = insert_result.data[0].get("id")
 
         # 3. Make the saved markdown searchable in the Knowledge Vault (RAG).
-        try:
-            await ingest_document_content(
-                content=content,
-                title=title,
-                document_type=doc_type,
-                user_id=user_id,
-                metadata={"file_path": file_path},
-            )
-        except Exception as rag_err:
-            logger.warning(f"Failed to ingest saved brain dump doc into RAG: {rag_err}")
+        if ingest:
+            try:
+                ingest_metadata = {
+                    **base_metadata,
+                    "document_id": doc_id,
+                    "vault_document_id": doc_id,
+                }
+                ingest_result = await ingest_document_content(
+                    content=content,
+                    title=title,
+                    document_type=doc_type,
+                    user_id=user_id,
+                    metadata=ingest_metadata,
+                )
+                embedding_count = int(ingest_result.get("chunk_count", 0) or 0)
+                processing_error = ingest_result.get("error")
+                processed = embedding_count > 0 and not processing_error
+                finalized_metadata = {
+                    **ingest_metadata,
+                    "processing_status": "completed"
+                    if processed
+                    else "failed",
+                }
+                if processing_error:
+                    finalized_metadata["processing_error"] = processing_error
 
-        return {"file_path": file_path, "doc_id": doc_id}
+                update_payload = {
+                    "is_processed": processed,
+                    "embedding_count": embedding_count,
+                    "metadata": finalized_metadata,
+                }
+                update_query = supabase.table("vault_documents").update(update_payload)
+                if doc_id:
+                    update_query = update_query.eq("id", doc_id)
+                else:
+                    update_query = update_query.eq("user_id", user_id).eq(
+                        "file_path", file_path
+                    )
+                update_query.execute()
+            except Exception as rag_err:
+                logger.warning(
+                    f"Failed to ingest saved brain dump doc into RAG: {rag_err}"
+                )
+                update_payload = {
+                    "is_processed": False,
+                    "embedding_count": 0,
+                    "metadata": {
+                        **base_metadata,
+                        "document_id": doc_id,
+                        "vault_document_id": doc_id,
+                        "processing_status": "failed",
+                        "processing_error": str(rag_err),
+                    },
+                }
+                update_query = supabase.table("vault_documents").update(update_payload)
+                if doc_id:
+                    update_query = update_query.eq("id", doc_id)
+                else:
+                    update_query = update_query.eq("user_id", user_id).eq(
+                        "file_path", file_path
+                    )
+                update_query.execute()
+
+        return {
+            "file_path": file_path,
+            "doc_id": doc_id,
+            "embedding_count": embedding_count,
+            "processed": processed,
+        }
     except Exception as e:
         logger.error(f"Failed to save to vault: {e}")
         return {"file_path": None, "doc_id": None}
@@ -423,7 +493,7 @@ async def process_brainstorm_conversation(
         # --- Step 1: Extract and save a clean Brain Dump summary ---
         brain_dump_prompt = (
             """You are an expert note-taker. The user just finished a brainstorming session.
-Extract ONLY the user's ideas, thoughts, and key points from the conversation below. 
+Extract ONLY the user's ideas, thoughts, and key points from the conversation below.
 Ignore the agent's questions and prompts — focus purely on what the USER said or meant.
 
 Format the output as a clean Markdown document with:
@@ -697,6 +767,12 @@ async def process_comprehensive_brainstorm(
                 summary["title"],
                 "Brain Dump Analysis",
                 user_id,
+                metadata={
+                    "session_id": session_id,
+                    "source": "voice_braindump",
+                    "artifact_kind": "analysis",
+                    "turn_count": turn_count,
+                },
             )
             analysis_doc_id = vault_result.get("doc_id")
 

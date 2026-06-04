@@ -573,6 +573,37 @@ Plans:
 
 </details>
 
+### Phase 109: Gemini Live Brainstorm Reliability
+
+**Goal:** The brain-dump/brainstorm voice session follows the current Gemini Live API contract end-to-end: stable server-to-server Live bridge, doc-aligned audio chunking and turn boundaries, resumable long sessions, interruption handling, transcript persistence, and explicit production UAT.
+**Requirements**: LIVE-01, LIVE-02, LIVE-03, LIVE-04, LIVE-05, LIVE-06
+**Success Criteria** (what must be TRUE):
+  1. The backend Live bridge uses a doc-aligned `LiveConnectConfig` for audio-only response modality, system instruction, voice config, input/output transcription, automatic activity detection, context-window compression, and session resumption when supported by the installed SDK
+  2. A live brainstorm can survive the provider's session lifecycle warnings/reset path by capturing session-resumption handles, handling `goAway`/reset signals, reconnecting without losing the browser WebSocket, and continuing from the active transcript
+  3. Browser mic input is sent as 16-bit PCM mono at 16kHz in 20-40ms chunks, while playback accepts Gemini's 24kHz PCM output without decode stalls or malformed MIME handling
+  4. Turn-taking works across greeting, user pause, agent reply, and user interruption: `audio_stream_end`, `turn_complete`, `generation_complete`, `interrupted`, and transcript events produce visible, recoverable UI state
+  5. Ending or losing a session still persists the transcript and comprehensive analysis path: no captured brainstorm is lost on tab close, reconnect, timeout, or Live reconnect
+  6. Automated tests cover backend Live event/config handling and frontend chunking/interruption behavior; manual UAT documents a 4-turn desktop/mobile session, an interruption, a refresh/reconnect, and final Knowledge Vault save
+**Depends on:** Phase 108
+**Plans:** 3 plans
+
+Plans:
+- [x] 109-01-backend-live-bridge-alignment-PLAN.md - Align FastAPI Gemini Live bridge with current Live API setup, session resumption, GoAway/reset handling, and transcript-safe reconnect
+- [x] 109-02-frontend-audio-turn-taking-PLAN.md - Align browser audio chunking, playback, explicit turn-end, interruption/barge-in, and overlay state with the Live API contract
+- [x] 109-03-production-uat-and-direct-live-readiness-PLAN.md - Add end-to-end UAT harness, deployment/config documentation, and a deferred ephemeral-token direct-live readiness design
+
+### Phase 123: Workflow Node Editor Viewer (Deferred)
+
+**Goal:** Deliver Phase 1 of Spec B as a read-only workflow-template graph viewer: graph projection columns/functions, widened workflow-template API responses, and a React Flow viewer at `/dashboard/workflows/editor/[id]`.
+**Requirements**: NODEEDITOR-MIGRATION-01, NODEEDITOR-API-01, NODEEDITOR-VIEWER-01
+**Depends on:** Phase 122
+**Plans:** 3 plans
+
+Plans:
+- [ ] 123-01-graph-projection-migration-PLAN.md - Add graph projection columns/functions and migrate existing workflow templates
+- [ ] 123-02-backend-api-extension-PLAN.md - Expose graph fields through workflow template models and APIs
+- [ ] 123-03-frontend-graph-viewer-PLAN.md - Render read-only workflow graphs with React Flow
+
 ---
 
 <details>

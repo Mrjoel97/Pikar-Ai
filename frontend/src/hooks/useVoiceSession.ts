@@ -19,6 +19,9 @@ import { buildAgentWebSocketUrl } from '@/services/api';
 
 interface VoiceSessionState {
     isConnected: boolean;
+    isAwaitingGreeting: boolean;
+    hasAgentStarted: boolean;
+    isReconnecting: boolean;
     isAgentSpeaking: boolean;
     agentTranscript: string;
     userTranscript: string;
@@ -68,15 +71,45 @@ const MIC_SAMPLE_RATE = 16000;
 const SPEAKER_SAMPLE_RATE = 24000;
 const BUFFER_SIZE = 4096;
 const CONNECTION_TIMEOUT_MS = 15000; // 15s timeout waiting for 'ready'
+const GREETING_TIMEOUT_MS = 12000; // 12s timeout waiting for first agent audio/transcript
 const HEARTBEAT_INTERVAL_MS = 20000; // Ping every 20s to detect dead connections
-// Local VAD constants are intentionally removed: the Gemini Live API has
-// server-side automatic_activity_detection which is the spec-correct
-// source of truth for speech start/end. Forwarding all audio
-// continuously and letting the server decide is the recommended pattern.
-const AGENT_RESPONSE_DELAY_MS = 250; // Keep voice turns feeling conversational instead of stalled
+const AGENT_RESPONSE_DELAY_MS = (() => {
+    const raw = process.env.NEXT_PUBLIC_VOICE_AGENT_RESPONSE_DELAY_MS;
+    const parsed = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) return 10;
+    return Math.min(40, parsed);
+})();
 const VOICE_AUTH_LOOKUP_TIMEOUT_MS = 2500;
-const PLAYBACK_BUFFER_TARGET_SAMPLES = Math.round(SPEAKER_SAMPLE_RATE * 0.35);
+const PLAYBACK_BUFFER_TARGET_MS = (() => {
+    const raw = process.env.NEXT_PUBLIC_VOICE_PLAYBACK_BUFFER_MS;
+    const parsed = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) return 60;
+    return Math.min(160, Math.max(40, parsed));
+})();
+const PLAYBACK_BUFFER_TARGET_SAMPLES = Math.round(
+    SPEAKER_SAMPLE_RATE * (PLAYBACK_BUFFER_TARGET_MS / 1000),
+);
+const PLAYBACK_SCHEDULE_AHEAD_SECONDS = 0.02;
 const REMOTE_TURN_ACTIVITY_TAIL_MS = 650;
+const VOICE_MIC_CHUNK_MS = (() => {
+    const raw = process.env.NEXT_PUBLIC_VOICE_MIC_CHUNK_MS;
+    const parsed = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) return 40;
+    return Math.min(40, Math.max(20, parsed));
+})();
+const VOICE_MIC_CHUNK_SAMPLES = Math.round(MIC_SAMPLE_RATE * (VOICE_MIC_CHUNK_MS / 1000));
+const VOICE_BARGE_IN_RMS = (() => {
+    const raw = process.env.NEXT_PUBLIC_VOICE_BARGE_IN_RMS;
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.02;
+})();
+const USER_TURN_IDLE_END_MS = (() => {
+    const raw = process.env.NEXT_PUBLIC_VOICE_TURN_IDLE_END_MS;
+    const parsed = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) return 500;
+    return Math.min(1200, Math.max(350, parsed));
+})();
+const VOICE_TURN_END_ENABLED = process.env.NEXT_PUBLIC_VOICE_TURN_END_ENABLED !== '0';
 // Noise-floor RMS cutoff. Drops chunks whose RMS is below this value
 // BEFORE they're encoded and forwarded to the server. This is NOT
 // local VAD: the threshold is far below any human speech (whispered
@@ -182,6 +215,39 @@ function resampleFloat32(
     return result;
 }
 
+function calculateRms(samples: Float32Array): number {
+    if (samples.length === 0) return 0;
+
+    let sumSq = 0;
+    for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i] ?? 0;
+        sumSq += sample * sample;
+    }
+    return Math.sqrt(sumSq / samples.length);
+}
+
+function appendFloat32Samples(
+    current: Float32Array,
+    next: Float32Array,
+): Float32Array {
+    if (current.length === 0) return next;
+    if (next.length === 0) return current;
+
+    const merged = new Float32Array(current.length + next.length);
+    merged.set(current, 0);
+    merged.set(next, current.length);
+    return merged;
+}
+
+function pcm16SamplesToBase64(pcm16: Int16Array): string {
+    const uint8 = new Uint8Array(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength);
+    let binary = '';
+    for (let i = 0; i < uint8.length; i++) {
+        binary += String.fromCharCode(uint8[i] ?? 0);
+    }
+    return btoa(binary);
+}
+
 function parsePcmSampleRate(mimeType?: string): number {
     if (!mimeType) return SPEAKER_SAMPLE_RATE;
 
@@ -215,32 +281,25 @@ async function decodeAgentAudioChunk(
         return resampleFloat32(pcm, sampleRate, SPEAKER_SAMPLE_RATE);
     }
 
-    const chunkBuffer = bytes.slice().buffer;
-    const decoded = await context.decodeAudioData(chunkBuffer);
-    const channelCount = Math.max(decoded.numberOfChannels, 1);
-    const mono = new Float32Array(decoded.length);
+    try {
+        const chunkBuffer = bytes.slice().buffer;
+        const decoded = await context.decodeAudioData(chunkBuffer);
+        const channelCount = Math.max(decoded.numberOfChannels, 1);
+        const mono = new Float32Array(decoded.length);
 
-    for (let channelIndex = 0; channelIndex < channelCount; channelIndex++) {
-        const channel = decoded.getChannelData(channelIndex);
-        for (let sampleIndex = 0; sampleIndex < decoded.length; sampleIndex++) {
-            mono[sampleIndex] += (channel[sampleIndex] ?? 0) / channelCount;
+        for (let channelIndex = 0; channelIndex < channelCount; channelIndex++) {
+            const channel = decoded.getChannelData(channelIndex);
+            for (let sampleIndex = 0; sampleIndex < decoded.length; sampleIndex++) {
+                mono[sampleIndex] += (channel[sampleIndex] ?? 0) / channelCount;
+            }
         }
-    }
 
-    return resampleFloat32(mono, decoded.sampleRate, SPEAKER_SAMPLE_RATE);
-}
-
-/**
- * Convert a base64-encoded 16-bit PCM buffer to Float32Array for playback.
- */
-function pcm16ToFloat32(base64: string): Float32Array {
-    const bytes = base64ToBytes(base64);
-    const int16 = new Int16Array(bytes.buffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-        float32[i] = int16[i] / 0x8000;
+        return resampleFloat32(mono, decoded.sampleRate, SPEAKER_SAMPLE_RATE);
+    } catch {
+        const sampleRate = parsePcmSampleRate(normalizedMime);
+        const pcm = pcm16BytesToFloat32(bytes);
+        return resampleFloat32(pcm, sampleRate, SPEAKER_SAMPLE_RATE);
     }
-    return float32;
 }
 
 export function drainPlaybackQueue(queue: Float32Array[], targetSamples: number): Float32Array | null {
@@ -292,6 +351,9 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
 
     const [state, setState] = useState<VoiceSessionState>({
         isConnected: false,
+        isAwaitingGreeting: false,
+        hasAgentStarted: false,
+        isReconnecting: false,
         isAgentSpeaking: false,
         agentTranscript: '',
         userTranscript: '',
@@ -314,9 +376,16 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
     const isPlayingRef = useRef(false);
     const playbackContextRef = useRef<AudioContext | null>(null);
     const currentPlaybackSourceRef = useRef<AudioBufferSourceNode | null>(null);
+    const scheduledPlaybackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+    const nextPlaybackTimeRef = useRef(0);
+    const playbackCompletionTimerRef = useRef<NodeJS.Timeout | null>(null);
     const micMonitorGainRef = useRef<GainNode | null>(null);
     const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
     const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const greetingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const userTurnEndTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const micChunkBufferRef = useRef<Float32Array>(new Float32Array(0));
+    const flushMicChunkBufferRef = useRef<(() => void) | null>(null);
     const connectAttemptRef = useRef(0);
     const lastRemoteActivityAtRef = useRef(0);
     const remoteTurnCompleteRef = useRef(true);
@@ -357,6 +426,75 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
         });
     }, []);
 
+    const clearGreetingTimeout = useCallback(() => {
+        if (greetingTimeoutRef.current) {
+            clearTimeout(greetingTimeoutRef.current);
+            greetingTimeoutRef.current = null;
+        }
+    }, []);
+
+    const clearUserTurnEndTimer = useCallback(() => {
+        if (userTurnEndTimerRef.current) {
+            clearTimeout(userTurnEndTimerRef.current);
+            userTurnEndTimerRef.current = null;
+        }
+    }, []);
+
+    const scheduleUserTurnEnd = useCallback((ws: WebSocket) => {
+        if (!VOICE_TURN_END_ENABLED) return;
+
+        clearUserTurnEndTimer();
+        userTurnEndTimerRef.current = setTimeout(() => {
+            userTurnEndTimerRef.current = null;
+            if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+
+            try {
+                flushMicChunkBufferRef.current?.();
+                ws.send(JSON.stringify({ type: 'audio_stream_end' }));
+            } catch {
+                // The socket may close between the readyState check and send.
+            }
+        }, USER_TURN_IDLE_END_MS);
+    }, [clearUserTurnEndTimer]);
+
+    const clearPlaybackCompletionTimer = useCallback(() => {
+        if (playbackCompletionTimerRef.current) {
+            clearTimeout(playbackCompletionTimerRef.current);
+            playbackCompletionTimerRef.current = null;
+        }
+    }, []);
+
+    const markPlaybackIdleIfSettled = useCallback(() => {
+        if (
+            scheduledPlaybackSourcesRef.current.size > 0
+            || playbackQueueRef.current.length > 0
+        ) {
+            return;
+        }
+
+        isPlayingRef.current = false;
+        currentPlaybackSourceRef.current = null;
+        nextPlaybackTimeRef.current = 0;
+
+        const remoteTurnSettled = remoteTurnCompleteRef.current
+            || (Date.now() - lastRemoteActivityAtRef.current) > REMOTE_TURN_ACTIVITY_TAIL_MS;
+        if (remoteTurnSettled && !pendingTurnDelayRef.current) {
+            setState(prev => ({ ...prev, isAgentSpeaking: false }));
+        }
+    }, []);
+
+    const armPlaybackCompletionTimer = useCallback((ctx: AudioContext) => {
+        clearPlaybackCompletionTimer();
+        const delayMs = Math.max(
+            0,
+            (nextPlaybackTimeRef.current - ctx.currentTime) * 1000,
+        ) + 80;
+        playbackCompletionTimerRef.current = setTimeout(() => {
+            playbackCompletionTimerRef.current = null;
+            markPlaybackIdleIfSettled();
+        }, delayMs);
+    }, [clearPlaybackCompletionTimer, markPlaybackIdleIfSettled]);
+
     const interruptPlayback = useCallback(() => {
         // Cancel pending thinking-pause timer
         if (pendingTurnDelayRef.current) {
@@ -370,6 +508,23 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
         playbackQueueRef.current = [];
         audioDecodeChainRef.current = Promise.resolve();
         isPlayingRef.current = false;
+        nextPlaybackTimeRef.current = 0;
+        clearPlaybackCompletionTimer();
+
+        for (const scheduledSource of scheduledPlaybackSourcesRef.current) {
+            scheduledSource.onended = null;
+            try {
+                scheduledSource.stop();
+            } catch {
+                // No-op if the source already ended.
+            }
+            try {
+                scheduledSource.disconnect();
+            } catch {
+                // No-op.
+            }
+        }
+        scheduledPlaybackSourcesRef.current.clear();
 
         const source = currentPlaybackSourceRef.current;
         currentPlaybackSourceRef.current = null;
@@ -388,49 +543,88 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
         }
 
         setState(prev => ({ ...prev, isAgentSpeaking: false }));
-    }, []);
+    }, [clearPlaybackCompletionTimer]);
 
     const playNextChunk = useCallback(() => {
-        const chunk = drainPlaybackQueue(
-            playbackQueueRef.current,
-            PLAYBACK_BUFFER_TARGET_SAMPLES,
-        );
-        if (!chunk) {
-            isPlayingRef.current = false;
-            currentPlaybackSourceRef.current = null;
-            const remoteTurnSettled = remoteTurnCompleteRef.current
-                || (Date.now() - lastRemoteActivityAtRef.current) > REMOTE_TURN_ACTIVITY_TAIL_MS;
-            if (remoteTurnSettled && !pendingTurnDelayRef.current) {
-                setState(prev => ({ ...prev, isAgentSpeaking: false }));
-            }
-            return;
-        }
-
-        lastRemoteActivityAtRef.current = Date.now();
-        isPlayingRef.current = true;
-        setState(prev => ({ ...prev, isAgentSpeaking: true }));
         const ctx = playbackContextRef.current;
-        if (!ctx) {
+        if (!ctx || ctx.state === 'closed') {
             isPlayingRef.current = false;
             return;
         }
 
-        const startPlayback = () => {
-            const buffer = ctx.createBuffer(1, chunk.length, SPEAKER_SAMPLE_RATE);
-            // TS 5.9 types `copyToChannel` narrowly; clone into a fresh Float32Array to satisfy it.
-            buffer.copyToChannel(Float32Array.from(chunk), 0);
+        const schedulePlayback = () => {
+            if (ctx.state === 'closed') {
+                isPlayingRef.current = false;
+                return;
+            }
 
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            currentPlaybackSourceRef.current = source;
-            source.onended = () => {
-                if (currentPlaybackSourceRef.current === source) {
-                    currentPlaybackSourceRef.current = null;
+            let scheduledAny = false;
+            if (nextPlaybackTimeRef.current <= ctx.currentTime) {
+                nextPlaybackTimeRef.current = ctx.currentTime + PLAYBACK_SCHEDULE_AHEAD_SECONDS;
+            }
+
+            while (playbackQueueRef.current.length > 0) {
+                const chunk = drainPlaybackQueue(
+                    playbackQueueRef.current,
+                    PLAYBACK_BUFFER_TARGET_SAMPLES,
+                );
+                if (!chunk) break;
+
+                lastRemoteActivityAtRef.current = Date.now();
+
+                const buffer = ctx.createBuffer(1, chunk.length, SPEAKER_SAMPLE_RATE);
+                // TS 5.9 types `copyToChannel` narrowly; clone into a fresh Float32Array to satisfy it.
+                buffer.copyToChannel(Float32Array.from(chunk), 0);
+
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(ctx.destination);
+
+                const startAt = Math.max(
+                    nextPlaybackTimeRef.current,
+                    ctx.currentTime + PLAYBACK_SCHEDULE_AHEAD_SECONDS,
+                );
+                nextPlaybackTimeRef.current = startAt + (chunk.length / SPEAKER_SAMPLE_RATE);
+
+                source.onended = () => {
+                    scheduledPlaybackSourcesRef.current.delete(source);
+                    if (currentPlaybackSourceRef.current === source) {
+                        currentPlaybackSourceRef.current = null;
+                    }
+                    try {
+                        source.disconnect();
+                    } catch {
+                        // No-op.
+                    }
+                    markPlaybackIdleIfSettled();
+                };
+
+                try {
+                    scheduledPlaybackSourcesRef.current.add(source);
+                    currentPlaybackSourceRef.current = source;
+                    source.start(startAt);
+                    scheduledAny = true;
+                } catch {
+                    scheduledPlaybackSourcesRef.current.delete(source);
+                    if (currentPlaybackSourceRef.current === source) {
+                        currentPlaybackSourceRef.current = null;
+                    }
+                    try {
+                        source.disconnect();
+                    } catch {
+                        // No-op.
+                    }
                 }
-                playNextChunk();
-            };
-            source.start();
+            }
+
+            if (scheduledAny) {
+                isPlayingRef.current = true;
+                setState(prev => ({ ...prev, isAgentSpeaking: true }));
+                armPlaybackCompletionTimer(ctx);
+                return;
+            }
+
+            markPlaybackIdleIfSettled();
         };
 
         // Resume context before source.start(); some browsers otherwise accept the
@@ -438,9 +632,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
         if (ctx.state === 'suspended') {
             void ctx.resume()
                 .then(() => {
-                    if (ctx.state !== 'closed') {
-                        startPlayback();
-                    }
+                    schedulePlayback();
                 })
                 .catch(() => {
                     isPlayingRef.current = false;
@@ -453,8 +645,8 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             return;
         }
 
-        startPlayback();
-    }, []);
+        schedulePlayback();
+    }, [armPlaybackCompletionTimer, markPlaybackIdleIfSettled]);
 
     const enqueueAudio = useCallback((base64Data: string, mimeType?: string) => {
         audioDecodeChainRef.current = audioDecodeChainRef.current
@@ -468,9 +660,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                 }
 
                 try {
-                    const float32 = mimeType
-                        ? await decodeAgentAudioChunk(base64Data, mimeType, ctx)
-                        : pcm16ToFloat32(base64Data);
+                    const float32 = await decodeAgentAudioChunk(base64Data, mimeType, ctx);
                     if (!float32.length || playbackContextRef.current !== ctx) {
                         return;
                     }
@@ -479,19 +669,20 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                     lastRemoteActivityAtRef.current = Date.now();
                     remoteTurnCompleteRef.current = false;
 
-                    if (!isPlayingRef.current && !pendingTurnDelayRef.current) {
-                        if (isAwaitingNewTurnRef.current) {
-                            // First audio chunk of new agent turn — add a tiny buffer for smoother playback.
-                            isAwaitingNewTurnRef.current = false;
-                            pendingTurnDelayRef.current = setTimeout(() => {
-                                pendingTurnDelayRef.current = null;
-                                if (playbackQueueRef.current.length > 0 && !isPlayingRef.current) {
-                                    playNextChunk();
-                                }
-                            }, AGENT_RESPONSE_DELAY_MS);
-                        } else {
-                            playNextChunk();
-                        }
+                    if (pendingTurnDelayRef.current) {
+                        return;
+                    }
+                    if (isAwaitingNewTurnRef.current && !isPlayingRef.current) {
+                        // First audio chunk of new agent turn — add a tiny buffer for smoother playback.
+                        isAwaitingNewTurnRef.current = false;
+                        pendingTurnDelayRef.current = setTimeout(() => {
+                            pendingTurnDelayRef.current = null;
+                            if (playbackQueueRef.current.length > 0 && !isPlayingRef.current) {
+                                playNextChunk();
+                            }
+                        }, AGENT_RESPONSE_DELAY_MS);
+                    } else {
+                        playNextChunk();
                     }
                 } catch (error) {
                     console.error('[VoiceSession] Failed to decode agent audio:', error);
@@ -533,6 +724,8 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
         }
+        clearGreetingTimeout();
+        clearUserTurnEndTimer();
         if (wsRef.current) {
             try {
                 wsRef.current.close();
@@ -545,6 +738,9 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
 
         setState({
             isConnected: false,
+            isAwaitingGreeting: false,
+            hasAgentStarted: false,
+            isReconnecting: false,
             isAgentSpeaking: false,
             agentTranscript: resumedAgentTranscript,
             userTranscript: resumedUserTranscript,
@@ -610,6 +806,7 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                 const ws = new WebSocket(wsUrl);
                 wsRef.current = ws;
                 let isConnected = false;
+                let hasAgentStarted = false;
                 let isSettled = false;
                 const isCurrentAttempt = () => connectAttemptRef.current === attemptId && wsRef.current === ws;
                 const settleResolve = () => {
@@ -621,6 +818,39 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                     if (isSettled) return;
                     isSettled = true;
                     reject(error);
+                };
+                const markAgentStarted = () => {
+                    if (hasAgentStarted) return;
+                    hasAgentStarted = true;
+                    clearGreetingTimeout();
+                    clearUserTurnEndTimer();
+                    setState(prev => ({
+                        ...prev,
+                        hasAgentStarted: true,
+                        isAwaitingGreeting: false,
+                        isReconnecting: false,
+                        error: null,
+                    }));
+                    settleResolve();
+                };
+                const failBeforeGreeting = (message: string) => {
+                    clearGreetingTimeout();
+                    clearUserTurnEndTimer();
+                    setState(prev => ({
+                        ...prev,
+                        isConnected: false,
+                        isAwaitingGreeting: false,
+                        isReconnecting: false,
+                        error: message,
+                    }));
+                    try {
+                        if (ws.readyState !== WebSocket.CLOSED) {
+                            ws.close();
+                        }
+                    } catch {
+                        // No-op if the socket is already closing.
+                    }
+                    settleReject(new Error(message));
                 };
 
                 ws.onopen = () => {
@@ -662,7 +892,14 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                     clearTimeout(connectionTimeoutRef.current);
                                     connectionTimeoutRef.current = null;
                                 }
-                                setState(prev => ({ ...prev, isConnected: true, error: null }));
+                                setState(prev => ({
+                                    ...prev,
+                                    isConnected: true,
+                                    isAwaitingGreeting: true,
+                                    hasAgentStarted: false,
+                                    isReconnecting: false,
+                                    error: null,
+                                }));
                                 if (captureCtx.state === 'closed' || playbackCtx.state === 'closed') {
                                     const err = 'Voice connection was interrupted during startup';
                                     setState(prev => ({ ...prev, error: err }));
@@ -685,6 +922,8 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                             ...prev,
                                             error: 'Voice connection lost — you can still finalize your session',
                                             isConnected: false,
+                                            isAwaitingGreeting: false,
+                                            isReconnecting: false,
                                         }));
                                         if (heartbeatRef.current) {
                                             clearInterval(heartbeatRef.current);
@@ -692,15 +931,21 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                         }
                                     }
                                 }, HEARTBEAT_INTERVAL_MS);
-                                settleResolve();
+                                clearGreetingTimeout();
+                                greetingTimeoutRef.current = setTimeout(() => {
+                                    if (!isCurrentAttempt() || hasAgentStarted) return;
+                                    failBeforeGreeting('Voice agent did not start speaking. Please retry the brain dump session.');
+                                }, GREETING_TIMEOUT_MS);
                                 break;
                             case 'audio':
+                                markAgentStarted();
                                 enqueueAudio(
                                     msg.data,
                                     typeof msg.mime_type === 'string' ? msg.mime_type : undefined,
                                 );
                                 break;
                             case 'transcript':
+                                markAgentStarted();
                                 lastRemoteActivityAtRef.current = Date.now();
                                 fullAgentTranscriptRef.current += msg.text;
                                 appendTranscriptChunk('agent', msg.text);
@@ -738,6 +983,14 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                         }
                                     });
                                 break;
+                            case 'generation_complete':
+                                audioDecodeChainRef.current = audioDecodeChainRef.current
+                                    .catch(() => {})
+                                    .then(() => {
+                                        remoteTurnCompleteRef.current = true;
+                                        isAwaitingNewTurnRef.current = true;
+                                    });
+                                break;
                             case 'waiting_for_input':
                                 // Server says "I'm done speaking, your turn now."
                                 // Force the half-duplex gate open by treating
@@ -756,6 +1009,10 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                             clearTimeout(pendingTurnDelayRef.current);
                                             pendingTurnDelayRef.current = null;
                                         }
+                                        if (!isPlayingRef.current && playbackQueueRef.current.length > 0) {
+                                            playNextChunk();
+                                            return;
+                                        }
                                         if (!isPlayingRef.current && playbackQueueRef.current.length === 0) {
                                             setState(prev => ({ ...prev, isAgentSpeaking: false }));
                                         }
@@ -763,6 +1020,33 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                 break;
                             case 'interrupted':
                                 interruptPlayback();
+                                break;
+                            case 'live_reconnecting':
+                                setState(prev => ({
+                                    ...prev,
+                                    isConnected: true,
+                                    isAwaitingGreeting: false,
+                                    isReconnecting: true,
+                                    error: null,
+                                }));
+                                break;
+                            case 'live_reconnected':
+                                setState(prev => ({
+                                    ...prev,
+                                    isConnected: true,
+                                    isAwaitingGreeting: false,
+                                    isReconnecting: false,
+                                    error: null,
+                                }));
+                                break;
+                            case 'live_reconnect_failed':
+                                setState(prev => ({
+                                    ...prev,
+                                    isConnected: false,
+                                    isAwaitingGreeting: false,
+                                    isReconnecting: false,
+                                    error: msg.message ?? 'Voice connection lost — you can still finalize your session',
+                                }));
                                 break;
                             case 'time_warning':
                                 setState(prev => ({
@@ -784,8 +1068,14 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                                     clearTimeout(connectionTimeoutRef.current);
                                     connectionTimeoutRef.current = null;
                                 }
-                                setState(prev => ({ ...prev, error: msg.message }));
-                                if (!isConnected) settleReject(new Error(msg.message));
+                                clearGreetingTimeout();
+                                setState(prev => ({
+                                    ...prev,
+                                    error: msg.message,
+                                    isAwaitingGreeting: false,
+                                    isReconnecting: false,
+                                }));
+                                if (!hasAgentStarted) settleReject(new Error(msg.message));
                                 break;
                         }
                     } catch (e) {
@@ -806,8 +1096,14 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                     const errorMsg = isConnected
                         ? 'Voice connection error — you can still finalize your session'
                         : 'Failed to connect — check your network or try again';
-                    setState(prev => ({ ...prev, error: errorMsg }));
-                    if (!isConnected) settleReject(new Error(errorMsg));
+                    clearGreetingTimeout();
+                    setState(prev => ({
+                        ...prev,
+                        error: errorMsg,
+                        isAwaitingGreeting: false,
+                        isReconnecting: false,
+                    }));
+                    if (!hasAgentStarted) settleReject(new Error(errorMsg));
                 };
 
                 ws.onclose = (event) => {
@@ -824,14 +1120,17 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                         clearTimeout(connectionTimeoutRef.current);
                         connectionTimeoutRef.current = null;
                     }
+                    clearGreetingTimeout();
                     cleanupResources();
                     const msg = closeCodeMessage(event.code, event.reason);
                     setState(prev => ({
                         ...prev,
                         isConnected: false,
+                        isAwaitingGreeting: false,
+                        isReconnecting: false,
                         ...(event.code !== 1000 ? { error: msg } : {}),
                     }));
-                    if (!isConnected) settleReject(new Error(msg));
+                    if (!hasAgentStarted) settleReject(new Error(msg));
                 };
             });
         } catch (err: unknown) {
@@ -842,11 +1141,22 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             console.error('[VoiceSession] Failed to connect:', err);
             setState(prev => ({
                 ...prev,
+                isConnected: false,
+                isAwaitingGreeting: false,
+                isReconnecting: false,
                 error: message,
             }));
             throw err;
         }
-    }, [appendTranscriptChunk, enqueueAudio, interruptPlayback]);
+    }, [
+        appendTranscriptChunk,
+        clearGreetingTimeout,
+        clearUserTurnEndTimer,
+        enqueueAudio,
+        interruptPlayback,
+        playNextChunk,
+        scheduleUserTurnEnd,
+    ]);
 
     const startMicCapture = async (ctx: AudioContext, stream: MediaStream, ws: WebSocket) => {
         const hasLiveTrack = stream.getTracks().some((track) => track.readyState !== 'ended');
@@ -856,6 +1166,41 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
 
         const source = ctx.createMediaStreamSource(stream);
         sourceNodeRef.current = source;
+        micChunkBufferRef.current = new Float32Array(0);
+
+        const sendMicChunk = (samples: Float32Array, scheduleTurnEnd = true) => {
+            if (ws.readyState !== WebSocket.OPEN || samples.length === 0) return;
+
+            const pcm16 = float32ToPcm16(samples, MIC_SAMPLE_RATE, MIC_SAMPLE_RATE);
+            const base64 = pcm16SamplesToBase64(pcm16);
+            ws.send(JSON.stringify({ type: 'audio', data: base64 }));
+            if (scheduleTurnEnd) {
+                scheduleUserTurnEnd(ws);
+            }
+        };
+
+        const flushMicChunkBuffer = () => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const pending = micChunkBufferRef.current;
+            if (pending.length === 0) return;
+
+            micChunkBufferRef.current = new Float32Array(0);
+            sendMicChunk(pending, false);
+        };
+        flushMicChunkBufferRef.current = flushMicChunkBuffer;
+
+        const bufferAndSendMicSamples = (samples: Float32Array) => {
+            micChunkBufferRef.current = appendFloat32Samples(
+                micChunkBufferRef.current,
+                samples,
+            );
+
+            while (micChunkBufferRef.current.length >= VOICE_MIC_CHUNK_SAMPLES) {
+                const chunk = micChunkBufferRef.current.slice(0, VOICE_MIC_CHUNK_SAMPLES);
+                micChunkBufferRef.current = micChunkBufferRef.current.slice(VOICE_MIC_CHUNK_SAMPLES);
+                sendMicChunk(chunk);
+            }
+        };
 
         const forwardInputChunk = (inputData: Float32Array) => {
             if (ws.readyState !== WebSocket.OPEN) return;
@@ -866,14 +1211,13 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             }
 
             // Tight half-duplex gate: suppress mic forwarding ONLY while
-            // the agent is actively playing audio chunks. As soon as the
-            // last chunk's onended fires (isPlayingRef flips to false in
-            // playNextChunk's "no more chunks" branch), mic forwarding
-            // resumes immediately.
+            // the agent is actively playing scheduled audio chunks. As soon
+            // as the last scheduled source drains, mic forwarding resumes
+            // immediately.
             //
             // Why this gate is required even with browser AEC enabled:
-            // Gemini Live's server-side VAD needs ~700ms of clean silence
-            // (silence_duration_ms in voice_session.py:1083) to close a
+            // Gemini Live's server-side VAD needs a short window of clean silence
+            // (silence_duration_ms in voice_session.py) to close a
             // user turn and trigger the model's response. If the client
             // forwards mic audio continuously — even just ambient noise
             // and faint AEC residue during the agent's playback — the
@@ -886,29 +1230,21 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             // the queue/tail/pending-turn flags) so it releases the
             // moment the agent finishes its current chunk. The user
             // can speak immediately after the agent's last word with
-            // no perceptible lag — the trade-off is that mid-sentence
-            // interruption isn't supported, which is acceptable because
-            // the system instruction caps the agent at 1-3 sentences.
+            // no perceptible lag. High-confidence speech above
+            // VOICE_BARGE_IN_RMS is allowed through and locally stops
+            // playback so the server can apply Live API barge-in.
             //
-            // We also no longer send `audio_stream_end` per-utterance:
-            // per the Gemini Live spec that signals "the microphone was
-            // turned off" — not "the user paused mid-conversation."
-            // Server-side `automatic_activity_detection` with
-            // `silence_duration_ms=700` is the source of truth for turn
-            // boundaries; per-utterance audio_stream_end confuses the
-            // model's turn-detection. We send it exactly once when the
-            // user ends the session (handled by the `end` message path
-            // in voice_session.py).
+            // After a non-silent user chunk, schedule a single turn-end
+            // marker if no more speech arrives. The server still owns
+            // speech detection, but this explicit idle marker prevents an
+            // open Live API input stream from swallowing the user's answer
+            // without ever triggering the next agent response.
             //
             // When the server explicitly tells us it is waiting for input,
             // unlock the gate even if the final playback tail is still
             // draining client-side. That lets the user answer immediately
             // after the intro instead of losing the first words of their
             // response behind a stale local playback flag.
-            if (isPlayingRef.current && !remoteTurnCompleteRef.current) {
-                return;
-            }
-
             // Noise-floor cutoff. See VOICE_NOISE_FLOOR_RMS comment at top
             // of file. Computes RMS of the incoming Float32 block; drops
             // pure background so the server VAD can see silence_duration_ms
@@ -916,24 +1252,19 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             // exceeds this threshold by 10x+. This is NOT local VAD —
             // server-side automatic_activity_detection remains the sole
             // arbiter of speech vs. silence.
-            let sumSq = 0;
-            for (let i = 0; i < inputData.length; i++) {
-                const s = inputData[i];
-                sumSq += s * s;
+            const rms = calculateRms(inputData);
+            if (isPlayingRef.current && !remoteTurnCompleteRef.current) {
+                if (rms < VOICE_BARGE_IN_RMS) {
+                    return;
+                }
+                interruptPlayback();
             }
-            const rms = Math.sqrt(sumSq / inputData.length);
             if (rms < VOICE_NOISE_FLOOR_RMS) {
                 return;
             }
 
-            const pcm16 = float32ToPcm16(inputData, ctx.sampleRate, MIC_SAMPLE_RATE);
-            const uint8 = new Uint8Array(pcm16.buffer);
-            let binary = '';
-            for (let i = 0; i < uint8.length; i++) {
-                binary += String.fromCharCode(uint8[i]);
-            }
-            const base64 = btoa(binary);
-            ws.send(JSON.stringify({ type: 'audio', data: base64 }));
+            const micSamples = resampleFloat32(inputData, ctx.sampleRate, MIC_SAMPLE_RATE);
+            bufferAndSendMicSamples(micSamples);
         };
 
         const connectMutedMonitor = (node: AudioNode) => {
@@ -981,6 +1312,23 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
     };
 
     const cleanupResources = useCallback(() => {
+        clearPlaybackCompletionTimer();
+
+        for (const scheduledSource of scheduledPlaybackSourcesRef.current) {
+            scheduledSource.onended = null;
+            try {
+                scheduledSource.stop();
+            } catch {
+                // No-op if already stopped.
+            }
+            try {
+                scheduledSource.disconnect();
+            } catch {
+                // No-op.
+            }
+        }
+        scheduledPlaybackSourcesRef.current.clear();
+
         if (currentPlaybackSourceRef.current) {
             currentPlaybackSourceRef.current.onended = null;
             try {
@@ -1031,13 +1379,17 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             clearTimeout(pendingTurnDelayRef.current);
             pendingTurnDelayRef.current = null;
         }
+        clearUserTurnEndTimer();
+        micChunkBufferRef.current = new Float32Array(0);
+        flushMicChunkBufferRef.current = null;
         playbackQueueRef.current = [];
         audioDecodeChainRef.current = Promise.resolve();
         isPlayingRef.current = false;
+        nextPlaybackTimeRef.current = 0;
         isAwaitingNewTurnRef.current = true;
         lastRemoteActivityAtRef.current = 0;
         remoteTurnCompleteRef.current = true;
-    }, []);
+    }, [clearPlaybackCompletionTimer, clearUserTurnEndTimer]);
 
     const disconnect = useCallback(() => {
         connectAttemptRef.current += 1;
@@ -1049,15 +1401,24 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
         }
+        clearGreetingTimeout();
+        flushMicChunkBufferRef.current?.();
+        clearUserTurnEndTimer();
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: 'end' }));
             wsRef.current.close();
         }
         wsRef.current = null;
         cleanupResources();
-        setState(prev => ({ ...prev, isConnected: false, isAgentSpeaking: false }));
+        setState(prev => ({
+            ...prev,
+            isConnected: false,
+            isAwaitingGreeting: false,
+            isReconnecting: false,
+            isAgentSpeaking: false,
+        }));
         // Note: Do not clear transcripts here so the caller can read them after disconnect
-    }, [cleanupResources]);
+    }, [cleanupResources, clearGreetingTimeout, clearUserTurnEndTimer]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -1071,13 +1432,16 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}): UseVoiceS
                 clearTimeout(connectionTimeoutRef.current);
                 connectionTimeoutRef.current = null;
             }
+            clearGreetingTimeout();
+            flushMicChunkBufferRef.current?.();
+            clearUserTurnEndTimer();
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;
             }
             cleanupResources();
         };
-    }, [cleanupResources]);
+    }, [cleanupResources, clearGreetingTimeout, clearUserTurnEndTimer]);
 
     return {
         ...state,

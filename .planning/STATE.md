@@ -477,6 +477,9 @@ Recent decisions affecting v10.0:
 - [Phase 105]: Plan 105-01: Single-PUT threshold = 25MB; chunk size = 8MB (256KB-aligned); helper bypasses __init__ in tests via __new__ to avoid Supabase env coupling; token refresh on 401 deferred to Phase 101
 - [Phase 108]: 108-03: ContentAgent shares stateless SOCIAL_TOOLS callables with Marketing's _SOCIAL_TOOLS_LIST (no fork/duplication); DIRECT SOCIAL POSTING prompt block placed adjacent to DELEGATION STRATEGY
 - [Phase 108]: 108-04 (v13.0 FINAL): disconnect_account async pattern — provider revoke first, local row update always (best-effort revoke). Per-platform endpoint matrix: twitter/api.twitter.com (Basic+body), google products on oauth2.googleapis.com/revoke, FB+IG+threads DELETE /me/permissions, tiktok client_key (not client_id), pinterest token_type_hint=access_token. LinkedIn skipped — no public revoke endpoint. Threads MEDIUM-confidence (extrapolated from FB/IG; verify with live account before merge). Sync revoke_connection wrapper preserved with thread-pool bridge for FastAPI handler context. Disconnect-ordering test pattern: parent.attach_mock + mock_calls inspection. 161 new tests across 8 modules; 83.42% line coverage on app/social/. make test-social CI gate enforces 80% floor.
+- [Phase 109]: Gemini Live brainstorm remains server-to-server in production; browser-direct Live is deferred until backend-minted ephemeral tokens, transcript mirroring, finalize compatibility, feature flags, and abuse controls exist.
+- [Phase 109]: Backend treats the browser WebSocket as the durable session boundary and can swap the provider Live session behind it using the latest session-resumption handle.
+- [Phase 109]: Frontend mic capture batches 16kHz PCM16 into 40ms chunks, flushes before idle `audio_stream_end`, and uses a separate high-RMS threshold for barge-in while preserving the Phase 84 noise floor.
 
 ### Roadmap Evolution
 
@@ -488,6 +491,9 @@ Recent decisions affecting v10.0:
 - Phase 88 added: Chat and Workspace Persistence — production hotfix bug 6/7
 - Phase 89 added: Knowledge Vault Auto Sync — production hotfix bug 7/7
 - v13.0 ROADMAP defined 2026-05-08: 8 phases (101 Security Hardening for connected_accounts, 102 Google Workspace Credential Bridge, 103 LinkedIn Posting Fix, 104 Twitter Media Upload Fix, 105 YouTube Resumable Upload, 106 TikTok Publish Completion, 107 Facebook Video Resumable Upload, 108 Hygiene & Coverage). Sequencing 101 → 102/103 → 104/105/106/107 (parallel) → 108. Coverage 22/22 REQ-IDs. v11.0 BETA-* deferred from v13.0 → v14.0.
+- Phase 109 added: Gemini Live Brainstorm Reliability
+- Orphaned workflow-node-editor planning bundle renumbered from Phase 109 to Phase 123 so Phase 109 can stay dedicated to Gemini Live Brainstorm Reliability
+- Phase 109 executed locally: 3/3 plans have SUMMARY.md artifacts; automated backend and hook tests are green, manual UAT remains to run on staging.
 
 ### Pending Todos
 

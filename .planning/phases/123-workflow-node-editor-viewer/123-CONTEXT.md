@@ -1,4 +1,4 @@
-# Phase 109: Workflow Node Editor — Phase 1 (Read-only Viewer) — Context
+# Phase 123: Workflow Node Editor — Phase 1 (Read-only Viewer) — Context
 
 **Gathered:** 2026-05-11
 **Status:** Ready for planning
@@ -78,5 +78,5 @@ All six were locked on 2026-05-11 — see Spec B § "Decisions (locked 2026-05-1
 
 ---
 
-*Phase: 109-workflow-node-editor-viewer*
+*Phase: 123-workflow-node-editor-viewer*
 *Context gathered: 2026-05-11 from Spec B (decisions locked same day)*

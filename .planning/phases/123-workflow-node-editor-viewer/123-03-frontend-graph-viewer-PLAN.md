@@ -1,9 +1,9 @@
 ---
-phase: 109-workflow-node-editor-viewer
+phase: 123-workflow-node-editor-viewer
 plan: 03
 type: execute
 wave: 1
-depends_on: [109-02]
+depends_on: [123-02]
 files_modified:
   - frontend/package.json
   - frontend/package-lock.json
@@ -83,8 +83,8 @@ Output: Visiting /dashboard/workflows/editor/{any-real-id} shows a graph. Visiti
 </execution_context>
 
 <context>
-@.planning/phases/109-workflow-node-editor-viewer/109-CONTEXT.md
-@.planning/phases/109-workflow-node-editor-viewer/109-02-backend-api-extension-PLAN.md
+@.planning/phases/123-workflow-node-editor-viewer/123-CONTEXT.md
+@.planning/phases/123-workflow-node-editor-viewer/123-02-backend-api-extension-PLAN.md
 @docs/superpowers/specs/2026-05-11-workflow-node-editor-design.md
 @frontend/src/app/dashboard/workflows/templates/page.tsx
 @frontend/src/components/workflows/WorkflowTemplateCard.tsx
@@ -260,7 +260,7 @@ export function NodeCanvas({ template }: NodeCanvasProps) {
 }
 
 // Fallback projection for templates where the migration didn't run yet.
-// Mirrors the Postgres helpers in 109-01 but in TypeScript.
+// Mirrors the Postgres helpers in 123-01 but in TypeScript.
 function projectStepsToGraph(steps: WorkflowTemplate['steps']): { nodes: Node[]; edges: Edge[] } {
   if (!steps || steps.length === 0) return { nodes: [], edges: [] };
   const nodes: Node[] = [

@@ -28,6 +28,7 @@ export interface BrainstormFinalizeResult {
   success: boolean;
   transcript_markdown: string | null;
   transcript_file_path: string | null;
+  transcript_doc_id: string | null;
   saved_categories: string[];
   error: string | null;
   summary: {
@@ -38,10 +39,13 @@ export interface BrainstormFinalizeResult {
   } | null;
   analysis_doc_id: string | null;
   analysis_markdown: string | null;
+  analysis_pending?: boolean;
 }
 
 export interface VoiceBrainstormOverlayProps {
   isConnected: boolean;
+  isAwaitingGreeting: boolean;
+  isReconnecting: boolean;
   isAgentSpeaking: boolean;
   transcriptTurns: VoiceTranscriptTurn[];
   remainingSeconds: number | null;
@@ -72,6 +76,7 @@ type OverlayPhase =
 function derivePhase(props: VoiceBrainstormOverlayProps): OverlayPhase {
   if (props.finalizeResult) return 'summary';
   if (props.isFinalizingBrainstorm) return 'processing';
+  if (props.isConnected && props.isAwaitingGreeting) return 'connecting';
   if (props.isConnected && !props.isFinalizingBrainstorm) return 'active';
   if (props.error && !props.isConnected && props.transcriptTurns.length > 0) return 'active_disconnected';
   if (props.error && !props.isConnected && props.transcriptTurns.length === 0) return 'connection_error';
@@ -179,8 +184,10 @@ function TranscriptPanel({ turns }: { turns: VoiceTranscriptTurn[] }) {
 // ---------------------------------------------------------------------------
 
 function ConnectingView({
+  isAwaitingGreeting,
   onCancel,
 }: {
+  isAwaitingGreeting: boolean;
   onCancel: () => void;
 }) {
   return (
@@ -198,8 +205,12 @@ function ConnectingView({
         </div>
       </div>
       <div className="text-center">
-        <p className="text-lg font-medium text-white">Connecting...</p>
-        <p className="mt-1 text-sm text-white/40">Setting up your brainstorm session</p>
+        <p className="text-lg font-medium text-white">
+          {isAwaitingGreeting ? 'Starting...' : 'Connecting...'}
+        </p>
+        <p className="mt-1 text-sm text-white/40">
+          {isAwaitingGreeting ? 'Waiting for Pikar to greet you' : 'Setting up your brainstorm session'}
+        </p>
       </div>
       <button
         onClick={onCancel}
@@ -261,6 +272,7 @@ function ActiveConversationView({
   timerPhase,
   effectiveRemaining,
   isWrappingUp,
+  isReconnecting,
   error,
   isDisconnected,
   onEndSession,
@@ -271,6 +283,7 @@ function ActiveConversationView({
   timerPhase: TimerPhase;
   effectiveRemaining: number | null;
   isWrappingUp: boolean;
+  isReconnecting: boolean;
   error: string | null;
   isDisconnected: boolean;
   onEndSession: () => void;
@@ -302,6 +315,16 @@ function ActiveConversationView({
             Connection lost — you can still end and save your session
           </motion.div>
         )}
+        {!isDisconnected && isReconnecting && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="w-full rounded-2xl bg-amber-500/20 border border-amber-500/30 px-4 py-2.5 text-center text-sm text-amber-300"
+          >
+            Reconnecting...
+          </motion.div>
+        )}
         {!isDisconnected && isWrappingUp && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -323,9 +346,9 @@ function ActiveConversationView({
 
       {/* Status line */}
       <div className="flex items-center gap-2.5">
-        <div className={`h-2 w-2 rounded-full ${isDisconnected ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+        <div className={`h-2 w-2 rounded-full ${isDisconnected || isReconnecting ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
         <span className="text-xs text-white/50">
-          {isDisconnected ? 'Disconnected' : isAgentSpeaking ? 'Speaking...' : 'Listening...'}
+          {isDisconnected ? 'Disconnected' : isReconnecting ? 'Reconnecting...' : isAgentSpeaking ? 'Speaking...' : 'Listening...'}
         </span>
         <span className={`font-mono text-sm font-bold tabular-nums ${colors.text} ${timerPhase === 'final' ? 'animate-pulse' : ''}`}>
           {timerDisplay}
@@ -368,8 +391,8 @@ function ProcessingView({
         <Loader2 className="h-8 w-8 text-violet-400 animate-spin" />
       </div>
       <div className="text-center">
-        <p className="text-lg font-medium text-white">Generating your analysis...</p>
-        <p className="mt-1 text-sm text-white/40">This usually takes a few seconds</p>
+        <p className="text-lg font-medium text-white">Saving your transcript...</p>
+        <p className="mt-1 text-sm text-white/40">The analysis can finish in the background</p>
       </div>
       {transcriptTurns.length > 0 && (
         <div className="w-full rounded-[20px] bg-white/5 border border-white/10 p-3 opacity-40">
@@ -451,11 +474,17 @@ function SummaryView({
         <CheckCircle className="h-8 w-8 text-emerald-400" />
       </div>
       <div className="text-center">
-        <p className="text-lg font-medium text-white">Session Complete</p>
+        <p className="text-lg font-medium text-white">
+          {result.analysis_pending ? 'Transcript Saved' : 'Session Complete'}
+        </p>
         {result.summary?.title && (
           <p className="mt-1 text-sm font-medium text-white/70">{result.summary.title}</p>
         )}
-        <p className="mt-2 text-xs text-white/40">Your analysis is ready in chat</p>
+        <p className="mt-2 text-xs text-white/40">
+          {result.analysis_pending
+            ? 'Your transcript is ready; the analysis is preparing'
+            : 'Your analysis is ready in chat'}
+        </p>
       </div>
       {/* Progress bar showing auto-dismiss countdown */}
       <div className="h-1 w-32 overflow-hidden rounded-full bg-white/10">
@@ -498,7 +527,8 @@ export default function VoiceBrainstormOverlay(props: VoiceBrainstormOverlayProp
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      setElapsed(0);
+      const resetTimer = window.setTimeout(() => setElapsed(0), 0);
+      return () => window.clearTimeout(resetTimer);
     }
     return () => {
       if (timerRef.current) {
@@ -511,7 +541,12 @@ export default function VoiceBrainstormOverlay(props: VoiceBrainstormOverlayProp
   // Local countdown from server's remainingSeconds
   const [localCountdown, setLocalCountdown] = useState<number | null>(null);
   useEffect(() => {
-    if (props.remainingSeconds !== null) setLocalCountdown(props.remainingSeconds);
+    if (props.remainingSeconds === null) return;
+    const timer = window.setTimeout(
+      () => setLocalCountdown(props.remainingSeconds),
+      0,
+    );
+    return () => window.clearTimeout(timer);
   }, [props.remainingSeconds]);
   useEffect(() => {
     if (localCountdown === null || localCountdown <= 0) return;
@@ -534,7 +569,10 @@ export default function VoiceBrainstormOverlay(props: VoiceBrainstormOverlayProp
 
   // Portal target
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMounted(true), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   if (!mounted) return null;
 
@@ -542,7 +580,12 @@ export default function VoiceBrainstormOverlay(props: VoiceBrainstormOverlayProp
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-lg px-4">
         <AnimatePresence mode="wait">
-          {phase === 'connecting' && <ConnectingView onCancel={props.onDismiss} />}
+          {phase === 'connecting' && (
+            <ConnectingView
+              isAwaitingGreeting={props.isAwaitingGreeting}
+              onCancel={props.onDismiss}
+            />
+          )}
 
           {phase === 'connection_error' && (
             <ConnectionErrorView
@@ -560,6 +603,7 @@ export default function VoiceBrainstormOverlay(props: VoiceBrainstormOverlayProp
               timerPhase={timerPhase}
               effectiveRemaining={effectiveRemaining}
               isWrappingUp={props.isWrappingUp}
+              isReconnecting={props.isReconnecting}
               error={props.error}
               isDisconnected={phase === 'active_disconnected'}
               onEndSession={props.onEndSession}

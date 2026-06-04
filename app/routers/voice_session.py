@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Awaitable
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -51,6 +52,24 @@ from app.middleware.rate_limiter import get_user_persona_limit, limiter
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["Voice"])
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _start_background_task(coro: Awaitable[Any], *, name: str) -> None:
+    """Run non-critical follow-up work without making the client wait."""
+    task = asyncio.create_task(coro, name=name)
+    _BACKGROUND_TASKS.add(task)
+
+    def _finish(done: asyncio.Task[Any]) -> None:
+        _BACKGROUND_TASKS.discard(done)
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            logger.info("Background task canceled: %s", name)
+        except Exception:
+            logger.exception("Background task failed: %s", name)
+
+    task.add_done_callback(_finish)
 
 
 class TranscriptTurn(BaseModel):
@@ -80,11 +99,13 @@ class BrainstormFinalizeResponse(BaseModel):
     validation_plan: str | None = None  # DEPRECATED — always None
     transcript_markdown: str | None = None
     transcript_file_path: str | None = None
+    transcript_doc_id: str | None = None
     saved_categories: list[str] = Field(default_factory=list)
     error: str | None = None
     summary: BrainstormSummary | None = None
     analysis_doc_id: str | None = None
     analysis_markdown: str | None = None
+    analysis_pending: bool = False
 
 
 class VoiceTranscriptionResponse(BaseModel):
@@ -110,7 +131,7 @@ CRITICAL PERSONALITY GUIDELINES:
 - Never use robotic phrasing like "As an AI..." or "I'm an AI assistant". You are simply a helpful advisor.
 - Use natural, human conversational filler words occasionally (like "Oh, interesting!", "Hmm, that's a great point", "I love that idea!", "You know what...").
 - Keep responses SHORT, thoughtful, and conversational (1-3 sentences max).
-- Take a natural pause before responding — don't rush. Think before you speak, like a real person would.
+- Respond promptly after the user finishes speaking. Do not add theatrical thinking pauses; the user should hear you within about 1-3 seconds.
 - Ask ONE follow-up question at a time to create a smooth, natural back-and-forth conversation.
 - Acknowledge what the user said warmly before asking your question.
 - Avoid long monologues — keep things flowing like a real conversation.
@@ -145,7 +166,16 @@ LIVE_MODEL = _normalize_live_model_name(os.getenv("GEMINI_LIVE_MODEL"))
 DEFAULT_LIVE_VOICE_NAME = os.getenv("GEMINI_VOICE_NAME", "Kore")
 VOICE_STT_FALLBACK_ENABLED = os.getenv("VOICE_STT_FALLBACK_ENABLED", "1") != "0"
 VOICE_STT_LANGUAGE_CODE = os.getenv("VOICE_STT_LANGUAGE_CODE", "en-US")
-VOICE_STT_IDLE_FLUSH_MS = int(os.getenv("VOICE_STT_IDLE_FLUSH_MS", "1200"))
+VOICE_STT_IDLE_FLUSH_MS = int(os.getenv("VOICE_STT_IDLE_FLUSH_MS", "500"))
+VOICE_CONTEXT_LOOKUP_TIMEOUT_SECONDS = float(
+    os.getenv("VOICE_CONTEXT_LOOKUP_TIMEOUT_SECONDS", "1.0")
+)
+VOICE_BRAINDUMP_CONTEXT_TIMEOUT_SECONDS = float(
+    os.getenv("VOICE_BRAINDUMP_CONTEXT_TIMEOUT_SECONDS", "1.0")
+)
+BRAINSTORM_FINALIZE_CONTEXT_TIMEOUT_SECONDS = float(
+    os.getenv("BRAINSTORM_FINALIZE_CONTEXT_TIMEOUT_SECONDS", "1.0")
+)
 
 # Session timer thresholds (seconds)
 SESSION_MAX_SECONDS = int(os.getenv("BRAINDUMP_SESSION_MAX_SECONDS", "900"))
@@ -158,7 +188,9 @@ BRAINDUMP_RESUME_CONTEXT_MAX_CHARS = int(
 )
 
 
-def _build_live_response_modalities(*, include_transcriptions: bool = True) -> list[str]:
+def _build_live_response_modalities(
+    *, include_transcriptions: bool = True
+) -> list[str]:
     """Return the Gemini Live response modalities for this session.
 
     Gemini Live voice sessions now require a single response modality in setup.
@@ -168,6 +200,192 @@ def _build_live_response_modalities(*, include_transcriptions: bool = True) -> l
     events rather than a second TEXT response modality.
     """
     return ["AUDIO"]
+
+
+def _safe_construct_type(type_factory: Any, **kwargs: Any) -> Any | None:
+    try:
+        return type_factory(**kwargs)
+    except Exception as exc:
+        logger.debug("Skipping optional Gemini Live config %s: %s", type_factory, exc)
+        return None
+
+
+def _build_live_connect_config(
+    types_module: Any,
+    live_voice_instruction: str,
+    *,
+    session_resumption_handle: str | None = None,
+) -> Any:
+    """Build a Gemini Live setup config using new SDK fields when available."""
+
+    base_live_config_kwargs: dict[str, Any] = {
+        "response_modalities": _build_live_response_modalities(),
+        "system_instruction": types_module.Content(
+            parts=[types_module.Part.from_text(text=live_voice_instruction)]
+        ),
+        "speech_config": types_module.SpeechConfig(
+            voice_config=types_module.VoiceConfig(
+                prebuilt_voice_config=types_module.PrebuiltVoiceConfig(
+                    voice_name=DEFAULT_LIVE_VOICE_NAME
+                )
+            )
+        ),
+    }
+
+    live_config_kwargs = dict(base_live_config_kwargs)
+
+    try:
+        live_config_kwargs.update(
+            {
+                "input_audio_transcription": types_module.AudioTranscriptionConfig(),
+                "output_audio_transcription": types_module.AudioTranscriptionConfig(),
+                "realtime_input_config": types_module.RealtimeInputConfig(
+                    automatic_activity_detection=types_module.AutomaticActivityDetection(
+                        start_of_speech_sensitivity=types_module.StartSensitivity.START_SENSITIVITY_HIGH,
+                        end_of_speech_sensitivity=types_module.EndSensitivity.END_SENSITIVITY_HIGH,
+                        prefix_padding_ms=int(
+                            os.getenv("GEMINI_LIVE_PREFIX_PADDING_MS", "120")
+                        ),
+                        silence_duration_ms=int(
+                            os.getenv("GEMINI_LIVE_SILENCE_MS", "500")
+                        ),
+                    )
+                ),
+            }
+        )
+    except Exception as cfg_err:
+        logger.warning(
+            "Falling back to basic Gemini Live config fields (SDK may be older): %s",
+            cfg_err,
+        )
+
+    optional_config_kwargs: dict[str, Any] = {}
+
+    sliding_window_factory = getattr(types_module, "SlidingWindow", None)
+    compression_factory = getattr(types_module, "ContextWindowCompressionConfig", None)
+    if compression_factory:
+        sliding_window = (
+            _safe_construct_type(sliding_window_factory)
+            if sliding_window_factory
+            else None
+        )
+        compression_kwargs = (
+            {"sliding_window": sliding_window} if sliding_window is not None else {}
+        )
+        compression = _safe_construct_type(
+            compression_factory,
+            **compression_kwargs,
+        )
+        if compression is not None:
+            optional_config_kwargs["context_window_compression"] = compression
+
+    session_resumption_factory = getattr(types_module, "SessionResumptionConfig", None)
+    if session_resumption_factory:
+        session_resumption = _safe_construct_type(
+            session_resumption_factory,
+            handle=session_resumption_handle,
+        )
+        if session_resumption is not None:
+            optional_config_kwargs["session_resumption"] = session_resumption
+
+    try:
+        return types_module.LiveConnectConfig(
+            **live_config_kwargs,
+            **optional_config_kwargs,
+        )
+    except Exception as cfg_err:
+        if optional_config_kwargs:
+            logger.warning(
+                "Gemini Live SDK rejected optional session config fields; retrying without them: %s",
+                cfg_err,
+            )
+            return types_module.LiveConnectConfig(**live_config_kwargs)
+        raise
+
+
+def _get_named_attr(obj: Any, *names: str, default: Any = None) -> Any:
+    for name in names:
+        if hasattr(obj, name):
+            return getattr(obj, name)
+    return default
+
+
+def _extract_live_resumption_handle(response: Any) -> str | None:
+    update = _get_named_attr(
+        response,
+        "session_resumption_update",
+        "sessionResumptionUpdate",
+    )
+    if not update:
+        return None
+
+    resumable = _get_named_attr(update, "resumable", default=True)
+    new_handle = _get_named_attr(update, "new_handle", "newHandle")
+    if resumable is False or not new_handle:
+        return None
+    return str(new_handle)
+
+
+def _live_time_left_seconds(time_left: Any) -> int | None:
+    if time_left is None:
+        return None
+    if isinstance(time_left, (int, float)):
+        return max(0, int(time_left))
+    if hasattr(time_left, "total_seconds"):
+        try:
+            return max(0, int(time_left.total_seconds()))
+        except Exception:
+            return None
+
+    seconds = getattr(time_left, "seconds", None)
+    nanos = getattr(time_left, "nanos", None)
+    if seconds is not None:
+        try:
+            extra = 1 if nanos and int(nanos) > 0 else 0
+            return max(0, int(seconds) + extra)
+        except Exception:
+            return None
+    return None
+
+
+async def _with_timeout_or_default(
+    awaitable: Awaitable[Any],
+    *,
+    timeout_seconds: float,
+    default: Any,
+    label: str,
+) -> Any:
+    """Keep optional context lookups from making live voice feel stuck."""
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        logger.info("%s timed out after %.1fs", label, timeout_seconds)
+        return default
+    except Exception as exc:
+        logger.debug("%s skipped: %s", label, exc)
+        return default
+
+
+def _extract_live_go_away_seconds(response: Any) -> tuple[bool, int | None]:
+    go_away = _get_named_attr(response, "go_away", "goAway")
+    if go_away is None:
+        return False, None
+
+    time_left = _get_named_attr(go_away, "time_left", "timeLeft")
+    return True, _live_time_left_seconds(time_left)
+
+
+def _response_generation_complete(response: Any) -> bool:
+    server_content = _get_named_attr(response, "server_content", "serverContent")
+    return bool(
+        server_content
+        and _get_named_attr(
+            server_content,
+            "generation_complete",
+            "generationComplete",
+            default=False,
+        )
+    )
 
 
 def _format_personalization_context(personalization: dict[str, Any]) -> str:
@@ -336,7 +554,9 @@ async def _load_recent_braindump_context(user_id: str) -> str:
             return ""
         content = file_bytes.decode("utf-8", errors="replace")
     except Exception as exc:
-        logger.debug("Recent braindump artifact download skipped for %s: %s", user_id, exc)
+        logger.debug(
+            "Recent braindump artifact download skipped for %s: %s", user_id, exc
+        )
         return ""
 
     trimmed_content = _truncate_resume_context(
@@ -580,6 +800,27 @@ async def _relay_user_turn_from_audio(
     return transcript_text
 
 
+async def _live_server_message_stream(live_session: Any, stop_event: asyncio.Event):
+    """Yield Gemini Live messages across multiple model turns.
+
+    `AsyncSession.receive()` yields one complete model turn, then returns after
+    `turn_complete`. A voice session needs to keep listening for every later
+    user turn, so callers should iterate this wrapper instead of calling
+    `receive()` only once.
+    """
+    while not stop_event.is_set():
+        yielded = False
+        async for response in live_session.receive():
+            yielded = True
+            yield response
+            if stop_event.is_set():
+                return
+        if not yielded:
+            await asyncio.sleep(0.05)
+        else:
+            await asyncio.sleep(0)
+
+
 async def _authenticate(websocket: WebSocket, data: dict) -> str | None:
     """Verify JWT from the first WebSocket message. Returns user_id or None."""
     token = data.get("token", "")
@@ -742,11 +983,215 @@ def _get_http_user_id(request: Request) -> str:
     return user_id
 
 
+async def _ingest_brainstorm_transcript_background(
+    *,
+    transcript_markdown: str,
+    transcript_file_path: str | None,
+    transcript_doc_id: str | None,
+    session_id: str,
+    user_id: str,
+) -> None:
+    if not transcript_markdown.strip():
+        return
+
+    try:
+        from app.rag.knowledge_vault import ingest_document_content
+        from app.services.supabase_client import get_service_client
+
+        metadata: dict[str, Any] = {"session_id": session_id}
+        if transcript_file_path:
+            metadata["file_path"] = transcript_file_path
+        if transcript_doc_id:
+            metadata["vault_document_id"] = transcript_doc_id
+
+        result = await ingest_document_content(
+            content=transcript_markdown,
+            title="Brain Dump Transcript",
+            document_type="Brain Dump Transcript",
+            user_id=user_id,
+            metadata=metadata,
+        )
+        embedding_count = int(result.get("chunk_count", 0) or 0)
+        if result.get("success") is False:
+            raise RuntimeError(result.get("error") or "Transcript ingestion failed")
+
+        update_payload = {
+            "is_processed": embedding_count > 0,
+            "embedding_count": embedding_count,
+            "metadata": {
+                **metadata,
+                "processing_status": "completed"
+                if embedding_count > 0
+                else "no_embeddings",
+            },
+        }
+        if transcript_doc_id or transcript_file_path:
+            supabase = get_service_client()
+            update_query = supabase.table("vault_documents").update(update_payload)
+            if transcript_doc_id:
+                update_query = update_query.eq("id", transcript_doc_id)
+            else:
+                update_query = update_query.eq("file_path", transcript_file_path)
+            update_query.eq("user_id", user_id).execute()
+
+        logger.info(
+            "Background-ingested brain-dump transcript session=%s doc=%s",
+            session_id,
+            transcript_doc_id,
+        )
+    except Exception as exc:
+        if transcript_doc_id or transcript_file_path:
+            try:
+                from app.services.supabase_client import get_service_client
+
+                metadata: dict[str, Any] = {"session_id": session_id}
+                if transcript_file_path:
+                    metadata["file_path"] = transcript_file_path
+                if transcript_doc_id:
+                    metadata["vault_document_id"] = transcript_doc_id
+                supabase = get_service_client()
+                update_query = supabase.table("vault_documents").update(
+                    {
+                        "is_processed": False,
+                        "embedding_count": 0,
+                        "metadata": {
+                            **metadata,
+                            "processing_status": "failed",
+                            "processing_error": str(exc),
+                        },
+                    }
+                )
+                if transcript_doc_id:
+                    update_query = update_query.eq("id", transcript_doc_id)
+                else:
+                    update_query = update_query.eq("file_path", transcript_file_path)
+                update_query.eq("user_id", user_id).execute()
+            except Exception:
+                logger.warning(
+                    "Failed to persist transcript ingestion failure session=%s doc=%s",
+                    session_id,
+                    transcript_doc_id,
+                    exc_info=True,
+                )
+        logger.warning(
+            "Background transcript ingestion failed session=%s doc=%s: %s",
+            session_id,
+            transcript_doc_id,
+            exc,
+        )
+
+
+async def _process_brainstorm_analysis_background(
+    *,
+    chat_history: str,
+    user_context: str | None,
+    session_id: str,
+    user_id: str,
+    turn_count: int,
+    transcript_markdown: str,
+    transcript_file_path: str | None,
+    transcript_doc_id: str | None,
+) -> None:
+    """Finish expensive post-call work after the transcript is already saved."""
+    started = time.time()
+    await _ingest_brainstorm_transcript_background(
+        transcript_markdown=transcript_markdown,
+        transcript_file_path=transcript_file_path,
+        transcript_doc_id=transcript_doc_id,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    context_parts = [f"User ID: {user_id}", f"Session ID: {session_id}"]
+    if user_context and user_context.strip():
+        context_parts.append(user_context.strip())
+
+    try:
+        from app.services.user_agent_factory import get_user_agent_factory
+
+        personalization = await _with_timeout_or_default(
+            get_user_agent_factory().get_runtime_personalization(user_id),
+            timeout_seconds=BRAINSTORM_FINALIZE_CONTEXT_TIMEOUT_SECONDS,
+            default={},
+            label=f"Background brainstorm personalization load for {user_id}",
+        )
+        personalization_context = _format_personalization_context(personalization)
+        if personalization_context:
+            context_parts.append(personalization_context)
+    except Exception as exc:
+        logger.debug(
+            "Background brainstorm personalization load skipped for %s: %s",
+            user_id,
+            exc,
+        )
+
+    recent_vault_brief = await _with_timeout_or_default(
+        _load_recent_vault_brief(user_id),
+        timeout_seconds=BRAINSTORM_FINALIZE_CONTEXT_TIMEOUT_SECONDS,
+        default="",
+        label=f"Background brainstorm vault brief load for {user_id}",
+    )
+    if recent_vault_brief:
+        context_parts.append(recent_vault_brief)
+
+    try:
+        from app.agents.tools.brain_dump import process_comprehensive_brainstorm
+
+        processor_result = await process_comprehensive_brainstorm(
+            chat_history=chat_history,
+            context="\n".join(context_parts),
+            session_id=session_id,
+            user_id=user_id,
+            turn_count=turn_count,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Background brainstorm analysis failed session=%s: %s",
+            session_id,
+            exc,
+        )
+        return
+
+    if not processor_result.get("success"):
+        logger.warning(
+            "Background brainstorm analysis returned failure session=%s: %s",
+            session_id,
+            processor_result.get("error"),
+        )
+        return
+
+    analysis_doc_id = processor_result.get("analysis_doc_id")
+    try:
+        from app.services.supabase_client import get_service_client
+
+        supabase = get_service_client()
+        supabase.table("braindump_sessions").update(
+            {
+                "analysis_doc_id": analysis_doc_id,
+                "turn_count": turn_count,
+            }
+        ).eq("user_id", user_id).eq("metadata->>session_id", session_id).execute()
+    except Exception as db_err:
+        logger.warning(
+            "Failed to attach background brainstorm analysis session=%s doc=%s: %s",
+            session_id,
+            analysis_doc_id,
+            db_err,
+        )
+
+    logger.info(
+        "Background brainstorm analysis completed session=%s doc=%s elapsed=%.1fs",
+        session_id,
+        analysis_doc_id,
+        time.time() - started,
+    )
+
+
 @router.post("/voice/transcribe", response_model=VoiceTranscriptionResponse)
 @limiter.limit(get_user_persona_limit)
 async def transcribe_voice_input(
     request: Request,
-    audio: UploadFile = File(...),
+    audio: UploadFile = File(...),  # noqa: B008 - FastAPI dependency marker
     language_code: str = Form("en-US"),
     sample_rate_hz: int = Form(16000),
 ) -> VoiceTranscriptionResponse:
@@ -797,21 +1242,6 @@ async def finalize_brainstorm_session(
     """
 
     user_id = _get_http_user_id(request)
-    personalization: dict[str, Any] = {}
-    personalization_context = ""
-    recent_vault_brief = ""
-
-    try:
-        from app.services.user_agent_factory import get_user_agent_factory
-
-        personalization = await get_user_agent_factory().get_runtime_personalization(
-            user_id
-        )
-        personalization_context = _format_personalization_context(personalization)
-    except Exception as exc:
-        logger.debug("Finalize personalization load skipped for %s: %s", user_id, exc)
-
-    recent_vault_brief = await _load_recent_vault_brief(user_id)
 
     coalesced_turns = _coalesce_transcript_turns(body.turns or [])
     chat_history = _turns_to_chat_history(coalesced_turns)
@@ -829,78 +1259,28 @@ async def finalize_brainstorm_session(
     transcript_doc_id: str | None = None
     saved_categories: list[str] = []
     try:
-        from app.agents.tools.brain_dump import (
-            _save_to_vault,
-            process_comprehensive_brainstorm,
-        )
+        from app.agents.tools.brain_dump import _save_to_vault
 
         vault_result = await _save_to_vault(
             transcript_markdown,
             "Brain Dump Transcript",
             "Brain Dump Transcript",
             user_id,
+            ingest=False,
+            metadata={
+                "session_id": body.session_id,
+                "source": "voice_braindump",
+                "artifact_kind": "transcript",
+            },
         )
         transcript_file_path = vault_result.get("file_path")
         transcript_doc_id = vault_result.get("doc_id")
         if transcript_file_path:
             saved_categories.append("Brain Dump Transcript")
 
-        context_parts = [f"User ID: {user_id}", f"Session ID: {body.session_id}"]
-        if body.context and body.context.strip():
-            context_parts.append(body.context.strip())
-        if personalization_context:
-            context_parts.append(personalization_context)
-        if recent_vault_brief:
-            context_parts.append(recent_vault_brief)
-
-        # Retry comprehensive processing up to 2 times on transient failures
-        processor_result: dict[str, Any] = {}
-        last_error = ""
-        for attempt in range(3):
-            try:
-                processor_result = await process_comprehensive_brainstorm(
-                    chat_history=chat_history,
-                    context="\n".join(context_parts),
-                    session_id=body.session_id,
-                    user_id=user_id,
-                    turn_count=len(coalesced_turns),
-                )
-                if processor_result.get("success"):
-                    break
-                last_error = processor_result.get("error", "Unknown processing error")
-            except Exception as retry_err:
-                last_error = str(retry_err)
-                logger.warning(
-                    "Brainstorm processing attempt %d failed: %s",
-                    attempt + 1,
-                    retry_err,
-                )
-            if attempt < 2:
-                await asyncio.sleep(1.0 * (attempt + 1))  # Back-off: 1s, 2s
-
-        if not processor_result.get("success"):
-            return BrainstormFinalizeResponse(
-                success=False,
-                transcript_markdown=transcript_markdown,
-                transcript_file_path=transcript_file_path,
-                saved_categories=saved_categories,
-                error=last_error
-                or "Failed to process brainstorm session after retries",
-            )
-
-        # Build summary from processor result
-        summary_data = processor_result.get("summary", {})
-        summary = BrainstormSummary(
-            title=summary_data.get("title", "Brain Dump Analysis"),
-            key_themes=summary_data.get("key_themes", []),
-            action_item_count=summary_data.get("action_item_count", 0),
-            executive_summary=summary_data.get("executive_summary", ""),
-        )
-
-        analysis_doc_id = processor_result.get("analysis_doc_id")
-        saved_categories.append("Brain Dump Analysis")
-
-        # Update braindump_sessions row if it exists
+        # Mark the transcript as saved immediately. The heavier analysis and
+        # embedding work runs in the background so long calls do not leave the
+        # user staring at an endless "transcribing" state.
         try:
             from app.services.supabase_client import get_service_client
 
@@ -911,7 +1291,6 @@ async def finalize_brainstorm_session(
                     "ended_at": datetime.now(timezone.utc).isoformat(),
                     "turn_count": len(coalesced_turns),
                     "transcript_doc_id": transcript_doc_id,
-                    "analysis_doc_id": analysis_doc_id,
                 }
             ).eq("user_id", user_id).eq("metadata->>session_id", body.session_id).eq(
                 "status", "active"
@@ -921,15 +1300,31 @@ async def finalize_brainstorm_session(
                 "Failed to update braindump_sessions on finalize: %s", db_err
             )
 
+        _start_background_task(
+            _process_brainstorm_analysis_background(
+                chat_history=chat_history,
+                user_context=body.context,
+                session_id=body.session_id,
+                user_id=user_id,
+                turn_count=len(coalesced_turns),
+                transcript_markdown=transcript_markdown,
+                transcript_file_path=transcript_file_path,
+                transcript_doc_id=transcript_doc_id,
+            ),
+            name=f"brainstorm-analysis:{body.session_id}",
+        )
+
         return BrainstormFinalizeResponse(
             success=True,
             validation_plan=None,
             transcript_markdown=transcript_markdown,
             transcript_file_path=transcript_file_path,
+            transcript_doc_id=transcript_doc_id,
             saved_categories=saved_categories,
-            summary=summary,
-            analysis_doc_id=analysis_doc_id,
-            analysis_markdown=processor_result.get("analysis_markdown"),
+            summary=None,
+            analysis_doc_id=None,
+            analysis_markdown=None,
+            analysis_pending=True,
         )
     except HTTPException:
         raise
@@ -939,6 +1334,7 @@ async def finalize_brainstorm_session(
             success=False,
             transcript_markdown=transcript_markdown,
             transcript_file_path=transcript_file_path,
+            transcript_doc_id=transcript_doc_id,
             saved_categories=saved_categories,
             error=str(e),
         )
@@ -984,8 +1380,11 @@ async def voice_session(websocket: WebSocket, session_id: str):
         try:
             from app.services.user_agent_factory import get_user_agent_factory
 
-            personalization = await get_user_agent_factory().get_runtime_personalization(
-                user_id
+            personalization = await _with_timeout_or_default(
+                get_user_agent_factory().get_runtime_personalization(user_id),
+                timeout_seconds=VOICE_CONTEXT_LOOKUP_TIMEOUT_SECONDS,
+                default={},
+                label=f"Voice personalization preload for {user_id}",
             )
             personalization_context = _format_personalization_context(personalization)
         except Exception as personalization_error:
@@ -995,15 +1394,25 @@ async def voice_session(websocket: WebSocket, session_id: str):
                 personalization_error,
             )
 
-        recent_vault_brief = await _load_recent_vault_brief(user_id)
+        recent_vault_brief = await _with_timeout_or_default(
+            _load_recent_vault_brief(user_id),
+            timeout_seconds=VOICE_CONTEXT_LOOKUP_TIMEOUT_SECONDS,
+            default="",
+            label=f"Voice vault brief load for {user_id}",
+        )
         recent_braindump_context = (
-            await _load_recent_braindump_context(user_id)
+            await _with_timeout_or_default(
+                _load_recent_braindump_context(user_id),
+                timeout_seconds=VOICE_BRAINDUMP_CONTEXT_TIMEOUT_SECONDS,
+                default="",
+                label=f"Voice braindump context load for {user_id}",
+            )
             if start_mode == "resume"
             else ""
         )
-        _raw_name = str(
-            personalization.get("agent_name") or "Pikar AI"
-        ).strip() or "Pikar AI"
+        _raw_name = (
+            str(personalization.get("agent_name") or "Pikar AI").strip() or "Pikar AI"
+        )
         # Prevent reserved internal agent/model names from leaking into
         # voice greetings (collision guard — see user_agent_factory.py).
         from app.services.user_agent_factory import _sanitize_display_name
@@ -1053,51 +1462,22 @@ async def voice_session(websocket: WebSocket, session_id: str):
         client = _get_genai_client()
         from google.genai import types
 
-        base_live_config_kwargs = {
-            "response_modalities": _build_live_response_modalities(),
-            "system_instruction": types.Content(
-                parts=[types.Part.from_text(text=live_voice_instruction)]
-            ),
-            "speech_config": types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=DEFAULT_LIVE_VOICE_NAME
-                    )
-                )
-            ),
-        }
-
-        try:
-            live_config = types.LiveConnectConfig(
-                **base_live_config_kwargs,
-                input_audio_transcription=types.AudioTranscriptionConfig(),
-                output_audio_transcription=types.AudioTranscriptionConfig(),
-                realtime_input_config=types.RealtimeInputConfig(
-                    automatic_activity_detection=types.AutomaticActivityDetection(
-                        start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                        end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                        prefix_padding_ms=int(
-                            os.getenv("GEMINI_LIVE_PREFIX_PADDING_MS", "120")
-                        ),
-                        silence_duration_ms=int(
-                            os.getenv("GEMINI_LIVE_SILENCE_MS", "700")
-                        ),
-                    )
-                ),
-            )
-        except Exception as cfg_err:
-            logger.warning(
-                "Falling back to basic Gemini Live config (SDK may be older): %s",
-                cfg_err,
-            )
-            live_config = types.LiveConnectConfig(**base_live_config_kwargs)
+        latest_session_resumption_handle: str | None = None
+        live_config = _build_live_connect_config(
+            types,
+            live_voice_instruction,
+            session_resumption_handle=latest_session_resumption_handle,
+        )
 
         async with client.aio.live.connect(
             model=LIVE_MODEL,
             config=live_config,
         ) as live_session:
+            active_live_session_ref: dict[str, Any] = {"session": live_session}
+            extra_live_contexts: list[Any] = []
             supports_realtime_audio_input = hasattr(
-                live_session, "send_realtime_input"
+                active_live_session_ref["session"],
+                "send_realtime_input",
             )
             await websocket.send_json({"type": "ready"})
             logger.info(
@@ -1106,8 +1486,8 @@ async def voice_session(websocket: WebSocket, session_id: str):
 
             # Trigger an initial greeting from the agent
             try:
-                if hasattr(live_session, "send_client_content"):
-                    await live_session.send_client_content(
+                if hasattr(active_live_session_ref["session"], "send_client_content"):
+                    await active_live_session_ref["session"].send_client_content(
                         turns=types.Content(
                             role="user",
                             parts=[types.Part.from_text(text=greeting_prompt)],
@@ -1115,7 +1495,10 @@ async def voice_session(websocket: WebSocket, session_id: str):
                         turn_complete=True,
                     )
                 else:
-                    await live_session.send(input=greeting_prompt, end_of_turn=True)
+                    await active_live_session_ref["session"].send(
+                        input=greeting_prompt,
+                        end_of_turn=True,
+                    )
                 logger.info("Sent initial greeting prompt to Gemini Live")
             except Exception as e:
                 logger.warning(f"Failed to send initial greeting prompt: {e}")
@@ -1126,6 +1509,7 @@ async def voice_session(websocket: WebSocket, session_id: str):
             pending_user_turn_lock = asyncio.Lock()
             pending_user_audio = bytearray()
             last_user_audio_at = 0.0
+            realtime_user_turn_open = False
 
             # Server-side transcript accumulator for auto-finalize on close.
             # Gemini Live transcriptions arrive as small chunks; we collect
@@ -1136,6 +1520,116 @@ async def voice_session(websocket: WebSocket, session_id: str):
             # block below saves whatever was captured to the knowledge vault
             # so the conversation is never lost.
             accumulated_turns: list[TranscriptTurn] = []
+
+            # Lightweight session counters: useful for summary logs without
+            # flooding production with per-chunk diagnostics.
+            diag_user_chunks_in = 0
+            diag_user_chunks_to_gemini = 0
+            diag_gemini_audio_chunks_out = 0
+            diag_gemini_text_events = 0
+            diag_turn_complete_events = 0
+            diag_waiting_for_input_events = 0
+            diag_session_start_ts = time.time()
+            logger.info(
+                "voice_session_started session=%s model=%s realtime_audio=%s",
+                session_id,
+                LIVE_MODEL,
+                supports_realtime_audio_input,
+            )
+
+            async def seed_reconnected_live_session(new_live_session: Any):
+                if latest_session_resumption_handle or not accumulated_turns:
+                    return
+
+                coalesced = _coalesce_transcript_turns(list(accumulated_turns))[-8:]
+                if not coalesced:
+                    return
+
+                compact_context = "\n".join(
+                    f"{turn['speaker'].upper()}: {turn['text']}"
+                    for turn in coalesced
+                    if turn.get("text")
+                )
+                if not compact_context:
+                    return
+
+                reconnect_prompt = (
+                    "The Gemini Live session reconnected. Continue this exact "
+                    "brainstorm without re-introducing yourself.\n\n"
+                    f"Recent transcript:\n{compact_context}"
+                )
+                try:
+                    if hasattr(new_live_session, "send_client_content"):
+                        await new_live_session.send_client_content(
+                            turns=types.Content(
+                                role="user",
+                                parts=[types.Part.from_text(text=reconnect_prompt)],
+                            ),
+                            turn_complete=True,
+                        )
+                    else:
+                        await new_live_session.send(
+                            input=reconnect_prompt,
+                            end_of_turn=True,
+                        )
+                except Exception as seed_err:
+                    logger.debug(
+                        "Failed to seed reconnected Live session context: %s",
+                        seed_err,
+                    )
+
+            async def reconnect_live_session(
+                *, reason: str, remaining_seconds: int | None
+            ) -> bool:
+                nonlocal supports_realtime_audio_input
+
+                event_payload: dict[str, Any] = {
+                    "type": "live_reconnecting",
+                    "reason": reason,
+                }
+                if remaining_seconds is not None:
+                    event_payload["remaining_seconds"] = remaining_seconds
+                await websocket.send_json(event_payload)
+
+                try:
+                    reconnect_config = _build_live_connect_config(
+                        types,
+                        live_voice_instruction,
+                        session_resumption_handle=latest_session_resumption_handle,
+                    )
+                    live_context = client.aio.live.connect(
+                        model=LIVE_MODEL,
+                        config=reconnect_config,
+                    )
+                    new_live_session = await live_context.__aenter__()
+                    extra_live_contexts.append(live_context)
+                    active_live_session_ref["session"] = new_live_session
+                    supports_realtime_audio_input = hasattr(
+                        new_live_session,
+                        "send_realtime_input",
+                    )
+                    await seed_reconnected_live_session(new_live_session)
+                    await websocket.send_json({"type": "live_reconnected"})
+                    logger.info(
+                        "voice_live_reconnected session=%s reason=%s resumption_handle=%s",
+                        session_id,
+                        reason,
+                        bool(latest_session_resumption_handle),
+                    )
+                    return True
+                except Exception as reconnect_err:
+                    message = f"Gemini Live reconnect failed: {str(reconnect_err)[:200]}"
+                    logger.warning(message)
+                    try:
+                        await websocket.send_json(
+                            {
+                                "type": "live_reconnect_failed",
+                                "message": message,
+                            }
+                        )
+                    except Exception:
+                        pass
+                    return False
 
             async def append_pending_user_audio(pcm_bytes: bytes):
                 nonlocal last_user_audio_at
@@ -1161,16 +1655,26 @@ async def voice_session(websocket: WebSocket, session_id: str):
                     audio_snapshot = await drain_pending_user_audio()
                     if not audio_snapshot:
                         return None
-                    return await _relay_user_turn_from_audio(
+                    transcript = await _relay_user_turn_from_audio(
                         audio_bytes=audio_snapshot,
                         websocket=websocket,
-                        live_session=live_session,
+                        live_session=active_live_session_ref["session"],
                         session_id=session_id,
                         reason=reason,
                     )
+                    if transcript:
+                        accumulated_turns.append(
+                            TranscriptTurn(
+                                speaker="user",
+                                text=transcript,
+                                ts_ms=int(time.time() * 1000),
+                            )
+                        )
+                    return transcript
 
             async def flush_pending_user_audio_on_idle():
                 """Fallback flush when the browser misses audio_stream_end."""
+                nonlocal realtime_user_turn_open
                 if VOICE_STT_IDLE_FLUSH_MS <= 0:
                     return
 
@@ -1185,19 +1689,47 @@ async def voice_session(websocket: WebSocket, session_id: str):
 
                         async with transcription_lock:
                             has_pending_audio = bool(pending_user_audio)
+                            should_flush_realtime = (
+                                supports_realtime_audio_input
+                                and realtime_user_turn_open
+                                and bool(last_user_audio_at)
+                            )
                             idle_for = (
                                 asyncio.get_running_loop().time() - last_user_audio_at
                                 if last_user_audio_at
                                 else 0.0
                             )
 
-                        if has_pending_audio and idle_for >= idle_flush_seconds:
+                        if should_flush_realtime and idle_for >= idle_flush_seconds:
+                            try:
+                                await active_live_session_ref[
+                                    "session"
+                                ].send_realtime_input(
+                                    audio_stream_end=True
+                                )
+                                realtime_user_turn_open = False
+                                logger.debug(
+                                    "voice_realtime_idle_audio_stream_end session=%s idle=%.2fs user_in=%d to_gemini=%d",
+                                    session_id,
+                                    idle_for,
+                                    diag_user_chunks_in,
+                                    diag_user_chunks_to_gemini,
+                                )
+                            except Exception as flush_err:
+                                realtime_user_turn_open = False
+                                logger.debug(
+                                    "Ignoring realtime idle audio flush error: %s",
+                                    flush_err,
+                                )
+                        elif has_pending_audio and idle_for >= idle_flush_seconds:
                             await dispatch_pending_user_turn("idle_flush")
                 except asyncio.CancelledError:
                     return
 
             async def forward_audio_to_gemini():
                 """Receive audio from browser, transcribe turns, and relay them."""
+                nonlocal diag_user_chunks_in, diag_user_chunks_to_gemini
+                nonlocal last_user_audio_at, realtime_user_turn_open
                 try:
                     while not stop_event.is_set():
                         raw = await websocket.receive_text()
@@ -1206,21 +1738,43 @@ async def voice_session(websocket: WebSocket, session_id: str):
 
                         if msg_type == "audio" and msg.get("data"):
                             pcm_bytes = base64.b64decode(msg["data"])
+                            diag_user_chunks_in += 1
+                            if diag_user_chunks_in == 1:
+                                logger.debug(
+                                    "voice_first_user_audio_chunk session=%s bytes=%d",
+                                    session_id,
+                                    len(pcm_bytes),
+                                )
+                            elif diag_user_chunks_in % 100 == 0:
+                                logger.debug(
+                                    "voice_user_audio_chunks session=%s in=%d to_gemini=%d",
+                                    session_id,
+                                    diag_user_chunks_in,
+                                    diag_user_chunks_to_gemini,
+                                )
                             if supports_realtime_audio_input:
-                                await live_session.send_realtime_input(
+                                last_user_audio_at = asyncio.get_running_loop().time()
+                                realtime_user_turn_open = True
+                                await active_live_session_ref[
+                                    "session"
+                                ].send_realtime_input(
                                     audio=types.Blob(
                                         data=pcm_bytes,
                                         mime_type="audio/pcm;rate=16000",
                                     )
                                 )
+                                diag_user_chunks_to_gemini += 1
                             else:
                                 await append_pending_user_audio(pcm_bytes)
 
                         elif msg_type == "audio_stream_end":
                             if supports_realtime_audio_input:
-                                await live_session.send_realtime_input(
+                                await active_live_session_ref[
+                                    "session"
+                                ].send_realtime_input(
                                     audio_stream_end=True
                                 )
+                                realtime_user_turn_open = False
                             else:
                                 await dispatch_pending_user_turn("audio_stream_end")
 
@@ -1231,10 +1785,14 @@ async def voice_session(websocket: WebSocket, session_id: str):
                             logger.info("Client requested voice session end")
                             if supports_realtime_audio_input:
                                 try:
-                                    await live_session.send_realtime_input(
+                                    await active_live_session_ref[
+                                        "session"
+                                    ].send_realtime_input(
                                         audio_stream_end=True
                                     )
+                                    realtime_user_turn_open = False
                                 except Exception as flush_err:
+                                    realtime_user_turn_open = False
                                     logger.debug(
                                         "Ignoring realtime audio flush error on end: %s",
                                         flush_err,
@@ -1257,12 +1815,54 @@ async def voice_session(websocket: WebSocket, session_id: str):
                         )
                     stop_event.set()
 
-            async def forward_audio_from_gemini():
+            async def forward_audio_from_gemini(reconnect_event: asyncio.Event):
                 """Receive audio/transcript from Gemini and forward to browser."""
+                nonlocal latest_session_resumption_handle
+                nonlocal diag_gemini_audio_chunks_out, diag_gemini_text_events
+                nonlocal diag_turn_complete_events, diag_waiting_for_input_events
                 try:
-                    async for response in live_session.receive():
+                    async for response in _live_server_message_stream(
+                        active_live_session_ref["session"],
+                        stop_event,
+                    ):
                         if stop_event.is_set():
                             break
+
+                        new_resumption_handle = _extract_live_resumption_handle(
+                            response
+                        )
+                        if new_resumption_handle:
+                            latest_session_resumption_handle = new_resumption_handle
+                            logger.debug(
+                                "voice_live_resumption_handle session=%s handle_prefix=%s",
+                                session_id,
+                                new_resumption_handle[:8],
+                            )
+
+                        go_away, go_away_seconds = _extract_live_go_away_seconds(
+                            response
+                        )
+                        if go_away:
+                            logger.info(
+                                "voice_live_go_away session=%s remaining_seconds=%s resumption_handle=%s",
+                                session_id,
+                                go_away_seconds,
+                                bool(latest_session_resumption_handle),
+                            )
+                            reconnected = await reconnect_live_session(
+                                reason="go_away",
+                                remaining_seconds=go_away_seconds,
+                            )
+                            if reconnected:
+                                reconnect_event.set()
+                            else:
+                                stop_event.set()
+                            break
+
+                        if _response_generation_complete(response):
+                            await websocket.send_json(
+                                {"type": "generation_complete"}
+                            )
 
                         sc = getattr(response, "server_content", None)
                         input_transcript_text = ""
@@ -1302,6 +1902,15 @@ async def voice_session(websocket: WebSocket, session_id: str):
                                             ),
                                         }
                                     )
+                                    diag_gemini_audio_chunks_out += 1
+                                    if diag_gemini_audio_chunks_out in (1, 50, 200):
+                                        logger.debug(
+                                            "voice_gemini_audio_out session=%s count=%d user_in=%d to_gemini=%d",
+                                            session_id,
+                                            diag_gemini_audio_chunks_out,
+                                            diag_user_chunks_in,
+                                            diag_user_chunks_to_gemini,
+                                        )
 
                                 # Text part (transcript of agent speech)
                                 if part.text and not output_transcript_text:
@@ -1324,6 +1933,15 @@ async def voice_session(websocket: WebSocket, session_id: str):
                                     "source": "gemini-live",
                                 }
                             )
+                            diag_gemini_text_events += 1
+                            logger.debug(
+                                "voice_input_transcript session=%s chars=%d elapsed=%.1fs user_in=%d gemini_out=%d",
+                                session_id,
+                                len(input_transcript_text),
+                                time.time() - diag_session_start_ts,
+                                diag_user_chunks_in,
+                                diag_gemini_audio_chunks_out,
+                            )
 
                         if output_transcript_text:
                             accumulated_turns.append(
@@ -1336,6 +1954,7 @@ async def voice_session(websocket: WebSocket, session_id: str):
                             await websocket.send_json(
                                 {"type": "transcript", "text": output_transcript_text}
                             )
+                            diag_gemini_text_events += 1
 
                         if sc and getattr(sc, "interrupted", False):
                             await websocket.send_json({"type": "interrupted"})
@@ -1354,10 +1973,30 @@ async def voice_session(websocket: WebSocket, session_id: str):
                         )
                         if waiting_for_input:
                             await websocket.send_json({"type": "waiting_for_input"})
+                            diag_waiting_for_input_events += 1
+                            logger.debug(
+                                "voice_waiting_for_input session=%s n=%d elapsed=%.1fs user_in=%d to_gemini=%d gemini_out=%d",
+                                session_id,
+                                diag_waiting_for_input_events,
+                                time.time() - diag_session_start_ts,
+                                diag_user_chunks_in,
+                                diag_user_chunks_to_gemini,
+                                diag_gemini_audio_chunks_out,
+                            )
 
                         # Handle turn completion
                         if sc and sc.turn_complete:
                             await websocket.send_json({"type": "turn_complete"})
+                            diag_turn_complete_events += 1
+                            logger.debug(
+                                "voice_turn_complete session=%s n=%d elapsed=%.1fs user_in=%d to_gemini=%d gemini_out=%d",
+                                session_id,
+                                diag_turn_complete_events,
+                                time.time() - diag_session_start_ts,
+                                diag_user_chunks_in,
+                                diag_user_chunks_to_gemini,
+                                diag_gemini_audio_chunks_out,
+                            )
 
                 except Exception as e:
                     if not stop_event.is_set():
@@ -1396,7 +2035,7 @@ async def voice_session(websocket: WebSocket, session_id: str):
                     except Exception:
                         return
                     try:
-                        await live_session.send(
+                        await active_live_session_ref["session"].send(
                             input=(
                                 "We have about 3 minutes left in this session. "
                                 "Please start wrapping up naturally — summarize the "
@@ -1445,14 +2084,85 @@ async def voice_session(websocket: WebSocket, session_id: str):
                 except asyncio.CancelledError:
                     return
 
-            # Run all three tasks concurrently
-            await asyncio.gather(
-                forward_audio_to_gemini(),
-                forward_audio_from_gemini(),
-                flush_pending_user_audio_on_idle(),
-                session_timer(),
-                return_exceptions=True,
-            )
+            # Run streaming tasks until the session ends, then cancel sleepers
+            # promptly so close/finalize persistence is not delayed.
+            try:
+                send_task = asyncio.create_task(forward_audio_to_gemini())
+                idle_flush_task = asyncio.create_task(
+                    flush_pending_user_audio_on_idle()
+                )
+                timer_task = asyncio.create_task(session_timer())
+                stop_waiter = asyncio.create_task(stop_event.wait())
+                persistent_tasks = [
+                    send_task,
+                    idle_flush_task,
+                    timer_task,
+                    stop_waiter,
+                ]
+
+                while not stop_event.is_set():
+                    reconnect_event = asyncio.Event()
+                    receive_task = asyncio.create_task(
+                        forward_audio_from_gemini(reconnect_event)
+                    )
+                    reconnect_waiter = asyncio.create_task(reconnect_event.wait())
+                    wait_tasks = [
+                        send_task,
+                        receive_task,
+                        timer_task,
+                        stop_waiter,
+                        reconnect_waiter,
+                    ]
+                    done, _pending = await asyncio.wait(
+                        wait_tasks,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+
+                    if reconnect_waiter in done and not stop_event.is_set():
+                        if not receive_task.done():
+                            receive_task.cancel()
+                            await asyncio.gather(
+                                receive_task,
+                                return_exceptions=True,
+                            )
+                        if not reconnect_waiter.done():
+                            reconnect_waiter.cancel()
+                        continue
+
+                    if not reconnect_waiter.done():
+                        reconnect_waiter.cancel()
+                    if not receive_task.done():
+                        receive_task.cancel()
+                    if stop_waiter not in done:
+                        stop_event.set()
+                    await asyncio.gather(
+                        receive_task,
+                        reconnect_waiter,
+                        return_exceptions=True,
+                    )
+                    break
+
+                for task in persistent_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*persistent_tasks, return_exceptions=True)
+            finally:
+                for live_context in reversed(extra_live_contexts):
+                    try:
+                        await live_context.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+                logger.info(
+                    "voice_session_ended session=%s elapsed=%.1fs user_in=%d to_gemini=%d gemini_audio_out=%d gemini_text=%d turn_complete=%d waiting_for_input=%d",
+                    session_id,
+                    time.time() - diag_session_start_ts,
+                    diag_user_chunks_in,
+                    diag_user_chunks_to_gemini,
+                    diag_gemini_audio_chunks_out,
+                    diag_gemini_text_events,
+                    diag_turn_complete_events,
+                    diag_waiting_for_input_events,
+                )
 
     except asyncio.TimeoutError:
         logger.warning("Voice session auth timeout")
@@ -1476,6 +2186,8 @@ async def voice_session(websocket: WebSocket, session_id: str):
         # comprehensive analysis; this path is the safety net so the raw
         # transcript is never lost.
         auto_saved = False
+        auto_transcript_doc_id = None
+        auto_turn_count = 0
         if (
             user_id
             and not session_finalized
@@ -1491,12 +2203,25 @@ async def voice_session(websocket: WebSocket, session_id: str):
                     )
                     from app.agents.tools.brain_dump import _save_to_vault
 
-                    await _save_to_vault(
+                    vault_result = await _save_to_vault(
                         transcript_md,
                         "Brain Dump Transcript",
                         "Brain Dump Transcript",
                         user_id,
+                        ingest=False,
+                        metadata={
+                            "session_id": session_id,
+                            "source": "voice_braindump",
+                            "artifact_kind": "transcript",
+                            "auto_saved": True,
+                        },
                     )
+                    auto_transcript_doc_id = (
+                        vault_result.get("doc_id")
+                        if isinstance(vault_result, dict)
+                        else None
+                    )
+                    auto_turn_count = len(coalesced)
                     auto_saved = True
                     logger.info(
                         "Auto-saved brain-dump transcript on close (session %s, %d turns)",
@@ -1516,12 +2241,17 @@ async def voice_session(websocket: WebSocket, session_id: str):
                 from app.services.supabase_client import get_service_client
 
                 supabase = get_service_client()
-                supabase.table("braindump_sessions").update(
-                    {
-                        "status": "completed" if auto_saved else "abandoned",
-                        "ended_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                ).eq("id", db_session_id).eq("status", "active").execute()
+                update_payload: dict[str, Any] = {
+                    "status": "completed" if auto_saved else "abandoned",
+                    "ended_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if auto_saved:
+                    update_payload["turn_count"] = auto_turn_count
+                    if auto_transcript_doc_id:
+                        update_payload["transcript_doc_id"] = auto_transcript_doc_id
+                supabase.table("braindump_sessions").update(update_payload).eq(
+                    "id", db_session_id
+                ).eq("status", "active").execute()
             except Exception as db_err:
                 logger.warning("Failed to mark session abandoned: %s", db_err)
         try:

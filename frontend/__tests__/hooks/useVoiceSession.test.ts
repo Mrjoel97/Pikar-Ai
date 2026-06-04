@@ -48,21 +48,28 @@ class MockAudioBuffer {
 
 class MockAudioBufferSourceNode extends MockAudioNode {
   static autoFinish = true
+  static instances: MockAudioBufferSourceNode[] = []
 
   buffer: AudioBuffer | null = null
   onended: (() => void) | null = null
-  start = vi.fn(() => {
+  start = vi.fn((_when?: number) => {
     if (MockAudioBufferSourceNode.autoFinish) {
       queueMicrotask(() => this.onended?.())
     }
   })
   stop = vi.fn()
+
+  constructor() {
+    super()
+    MockAudioBufferSourceNode.instances.push(this)
+  }
 }
 
 class MockAudioContext {
   static instances: MockAudioContext[] = []
 
   state: AudioContextState = 'running'
+  currentTime = 0
   readonly sampleRate: number
   readonly destination = {}
   lastScriptProcessor: MockScriptProcessorNode | null = null
@@ -149,6 +156,12 @@ class MockWebSocket {
   }
 }
 
+const AGENT_GREETING_AUDIO = {
+  type: 'audio',
+  data: 'AAAAAA==',
+  mime_type: 'audio/pcm;rate=24000',
+}
+
 describe('useVoiceSession', () => {
   const originalAudioContext = globalThis.AudioContext
   const originalWebSocket = globalThis.WebSocket
@@ -159,6 +172,7 @@ describe('useVoiceSession', () => {
   beforeEach(() => {
     MockAudioContext.instances = []
     MockWebSocket.instances = []
+    MockAudioBufferSourceNode.instances = []
     MockAudioBufferSourceNode.autoFinish = true
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -239,14 +253,24 @@ describe('useVoiceSession', () => {
     })
 
     expect(result.current.isConnected).toBe(true)
+    expect(result.current.isAwaitingGreeting).toBe(true)
+    expect(result.current.hasAgentStarted).toBe(false)
     expect(result.current.error).toBeNull()
+
+    await act(async () => {
+      secondSocket.emitMessage(AGENT_GREETING_AUDIO)
+      await Promise.resolve()
+    })
+
+    expect(result.current.hasAgentStarted).toBe(true)
+    expect(result.current.isAwaitingGreeting).toBe(false)
 
     act(() => {
       result.current.disconnect()
     })
   })
 
-  it('keeps the user turn open for server-side VAD instead of sending audio_stream_end mid-session', async () => {
+  it('sends audio_stream_end after a user speech idle gap', async () => {
     const { result } = renderHook(() => useVoiceSession())
 
     const pending = result.current.connect('session-quiet-turn')
@@ -260,6 +284,7 @@ describe('useVoiceSession', () => {
 
     await act(async () => {
       socket.emitMessage({ type: 'ready' })
+      socket.emitMessage(AGENT_GREETING_AUDIO)
       await pending
     })
 
@@ -271,6 +296,8 @@ describe('useVoiceSession', () => {
     const sentTypes = () =>
       socket.send.mock.calls.map(([payload]) => JSON.parse(payload as string).type)
 
+    vi.useFakeTimers()
+
     act(() => {
       scriptNode?.onaudioprocess?.({
         inputBuffer: {
@@ -281,6 +308,49 @@ describe('useVoiceSession', () => {
 
     expect(sentTypes()).toContain('audio')
     expect(sentTypes()).not.toContain('audio_stream_end')
+
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sentTypes()).toContain('audio_stream_end')
+
+    act(() => {
+      result.current.disconnect()
+    })
+  })
+
+  it('accumulates server user_transcript chunks into the brain-dump transcript', async () => {
+    const { result } = renderHook(() => useVoiceSession())
+
+    const pending = result.current.connect('session-user-transcript')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const socket = MockWebSocket.instances[0]
+    expect(socket).toBeDefined()
+
+    await act(async () => {
+      socket.emitMessage({ type: 'ready' })
+      socket.emitMessage(AGENT_GREETING_AUDIO)
+      await pending
+    })
+
+    await act(async () => {
+      socket.emitMessage({ type: 'user_transcript', text: 'first idea' })
+      socket.emitMessage({ type: 'user_transcript', text: 'second detail' })
+      await Promise.resolve()
+    })
+
+    expect(result.current.userTranscript).toBe('first idea second detail')
+    expect(result.current.transcriptTurns).toEqual([
+      expect.objectContaining({
+        speaker: 'user',
+        text: 'first idea second detail',
+      }),
+    ])
 
     act(() => {
       result.current.disconnect()
@@ -310,6 +380,52 @@ describe('useVoiceSession', () => {
     ])
   })
 
+  it('schedules agent audio chunks back-to-back on the WebAudio clock', async () => {
+    MockAudioBufferSourceNode.autoFinish = false
+
+    const { result } = renderHook(() => useVoiceSession())
+
+    const pending = result.current.connect('session-scheduled-output')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const socket = MockWebSocket.instances[0]
+    expect(socket).toBeDefined()
+
+    await act(async () => {
+      socket.emitMessage({ type: 'ready' })
+      socket.emitMessage(AGENT_GREETING_AUDIO)
+      await pending
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      socket.emitMessage({
+        type: 'audio',
+        data: 'AAAAAA==',
+        mime_type: 'audio/pcm;rate=24000',
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const startTimes = MockAudioBufferSourceNode.instances
+      .map((source) => source.start.mock.calls[0]?.[0])
+      .filter((value): value is number => typeof value === 'number')
+
+    expect(startTimes.length).toBeGreaterThanOrEqual(2)
+    expect(startTimes[0]).toBeCloseTo(0.02, 5)
+    expect(startTimes[1]).toBeCloseTo(startTimes[0] + 2 / 24000, 5)
+
+    act(() => {
+      result.current.disconnect()
+    })
+  })
+
   it('unlocks mic capture as soon as the server sends waiting_for_input', async () => {
     MockAudioBufferSourceNode.autoFinish = false
 
@@ -326,6 +442,7 @@ describe('useVoiceSession', () => {
 
     await act(async () => {
       socket.emitMessage({ type: 'ready' })
+      socket.emitMessage(AGENT_GREETING_AUDIO)
       await pending
     })
 
@@ -375,12 +492,10 @@ describe('useVoiceSession', () => {
   describe('noise-floor cutoff (HOTFIX-02)', () => {
     /**
      * Fill a Float32Array with sign-alternating samples so its mean is zero
-     * and its RMS equals |value|. Length 128 matches the AudioWorklet block
-     * size noted in 84-RESEARCH.md § Risks #4; ScriptProcessor uses 4096 in
-     * production but the cutoff is computed per-call on whatever block the
-     * harness pushes — 128 is a representative worklet-sized chunk.
+     * and its RMS equals |value|. Length 640 is 40ms at 16kHz, matching the
+     * Gemini Live chunk window used by the hook.
      */
-    const makeFloat32ChunkAtRMS = (rms: number, length = 128): Float32Array => {
+    const makeFloat32ChunkAtRMS = (rms: number, length = 640): Float32Array => {
       const chunk = new Float32Array(length)
       for (let i = 0; i < length; i++) {
         chunk[i] = i % 2 === 0 ? rms : -rms
@@ -412,6 +527,7 @@ describe('useVoiceSession', () => {
 
       await act(async () => {
         socket.emitMessage({ type: 'ready' })
+        socket.emitMessage(AGENT_GREETING_AUDIO)
         await pending
       })
 
@@ -429,8 +545,8 @@ describe('useVoiceSession', () => {
           data: 'AAAAAA==',
           mime_type: 'audio/pcm;rate=24000',
         })
-        // Wait past AGENT_RESPONSE_DELAY_MS (250ms) for pendingTurnDelay to fire
-        await new Promise((resolve) => setTimeout(resolve, 300))
+        // Wait past AGENT_RESPONSE_DELAY_MS for pendingTurnDelay to fire.
+        await new Promise((resolve) => setTimeout(resolve, 40))
         await Promise.resolve()
         await Promise.resolve()
       })
@@ -462,6 +578,197 @@ describe('useVoiceSession', () => {
         ([payload]) =>
           (JSON.parse(payload as string) as { type?: string }).type === 'audio',
       ).length
+
+    const audioMessages = (socket: MockWebSocket) =>
+      socket.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string) as { type?: string; data?: string })
+        .filter((message) => message.type === 'audio')
+
+    const driveToActivePlayback = async (
+      sessionId: string,
+      hookResult: { current: ReturnType<typeof useVoiceSession> },
+    ) => {
+      MockAudioBufferSourceNode.autoFinish = false
+      const pending = hookResult.current.connect(sessionId)
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1]
+
+      await act(async () => {
+        socket.emitMessage({ type: 'ready' })
+        socket.emitMessage(AGENT_GREETING_AUDIO)
+        await pending
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const captureContext =
+        MockAudioContext.instances[MockAudioContext.instances.length - 2]
+      const scriptNode = captureContext?.lastScriptProcessor
+      expect(scriptNode?.onaudioprocess).toBeTypeOf('function')
+      expect(hookResult.current.isAgentSpeaking).toBe(true)
+
+      return { socket, scriptNode: scriptNode! }
+    }
+
+    it('coalesces mic frames into 20-40ms PCM payloads before sending', async () => {
+      const { result } = renderHook(() => useVoiceSession())
+      const { socket, scriptNode } = await driveToPostIntro(
+        'session-coalesced-mic',
+        result,
+      )
+
+      const baseline = audioSendCount(socket)
+      for (let i = 0; i < 4; i++) {
+        pushChunk(scriptNode, makeFloat32ChunkAtRMS(0.05, 128))
+      }
+      expect(audioSendCount(socket)).toBe(baseline)
+
+      pushChunk(scriptNode, makeFloat32ChunkAtRMS(0.05, 128))
+      expect(audioSendCount(socket)).toBe(baseline + 1)
+      expect(atob(audioMessages(socket).at(-1)?.data ?? '')).toHaveLength(1280)
+
+      act(() => {
+        result.current.disconnect()
+      })
+    })
+
+    it('plays Gemini 24kHz PCM output without decode stalls', async () => {
+      const { result } = renderHook(() => useVoiceSession())
+
+      const pending = result.current.connect('session-24khz-output')
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1]
+
+      await act(async () => {
+        socket.emitMessage({ type: 'ready' })
+        socket.emitMessage(AGENT_GREETING_AUDIO)
+        await pending
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const playbackContext = MockAudioContext.instances[MockAudioContext.instances.length - 1]
+      expect(playbackContext.createBuffer).toHaveBeenCalledWith(1, expect.any(Number), 24000)
+      expect(result.current.error).toBeNull()
+
+      act(() => {
+        result.current.disconnect()
+      })
+    })
+
+    it('falls back to 24kHz PCM playback when audio MIME is missing or malformed', async () => {
+      const { result } = renderHook(() => useVoiceSession())
+
+      const pending = result.current.connect('session-fallback-output')
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1]
+
+      await act(async () => {
+        socket.emitMessage({ type: 'ready' })
+        socket.emitMessage({ type: 'audio', data: 'AAAAAA==' })
+        await pending
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        socket.emitMessage({
+          type: 'audio',
+          data: 'AAAAAA==',
+          mime_type: 'not-a-real-audio-mime',
+        })
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const playbackContext = MockAudioContext.instances[MockAudioContext.instances.length - 1]
+      expect(playbackContext.createBuffer).toHaveBeenCalled()
+      expect(result.current.error).toBeNull()
+
+      act(() => {
+        result.current.disconnect()
+      })
+    })
+
+    it('allows high-RMS barge-in while agent audio is playing', async () => {
+      const { result } = renderHook(() => useVoiceSession())
+      const { socket, scriptNode } = await driveToActivePlayback(
+        'session-barge-in',
+        result,
+      )
+
+      const before = audioSendCount(socket)
+      pushChunk(scriptNode, makeFloat32ChunkAtRMS(0.05))
+
+      expect(audioSendCount(socket)).toBe(before + 1)
+      expect(result.current.isAgentSpeaking).toBe(false)
+
+      act(() => {
+        result.current.disconnect()
+      })
+    })
+
+    it('suppresses low-RMS playback echo while agent audio is playing', async () => {
+      const { result } = renderHook(() => useVoiceSession())
+      const { socket, scriptNode } = await driveToActivePlayback(
+        'session-echo-suppression',
+        result,
+      )
+
+      const before = audioSendCount(socket)
+      pushChunk(scriptNode, makeFloat32ChunkAtRMS(0.006))
+
+      expect(audioSendCount(socket)).toBe(before)
+      expect(result.current.isAgentSpeaking).toBe(true)
+
+      act(() => {
+        result.current.disconnect()
+      })
+    })
+
+    it('handles generation_complete and live reconnect lifecycle messages', async () => {
+      const { result } = renderHook(() => useVoiceSession())
+      const { socket } = await driveToPostIntro('session-live-lifecycle', result)
+
+      await act(async () => {
+        socket.emitMessage({ type: 'generation_complete' })
+        socket.emitMessage({ type: 'live_reconnecting', reason: 'go_away' })
+        await Promise.resolve()
+      })
+      expect(result.current.isConnected).toBe(true)
+      expect(result.current.isReconnecting).toBe(true)
+
+      await act(async () => {
+        socket.emitMessage({ type: 'live_reconnected' })
+        await Promise.resolve()
+      })
+      expect(result.current.isConnected).toBe(true)
+      expect(result.current.isReconnecting).toBe(false)
+      expect(result.current.error).toBeNull()
+
+      await act(async () => {
+        socket.emitMessage({
+          type: 'live_reconnect_failed',
+          message: 'Live session reconnect failed',
+        })
+        await Promise.resolve()
+      })
+      expect(result.current.isConnected).toBe(false)
+      expect(result.current.isReconnecting).toBe(false)
+      expect(result.current.error).toBe('Live session reconnect failed')
+
+      act(() => {
+        result.current.disconnect()
+      })
+    })
 
     it('forwards user speech (RMS > floor) after intro onended fires', async () => {
       const { result } = renderHook(() => useVoiceSession())
@@ -611,6 +918,7 @@ describe('useVoiceSession', () => {
 
       await act(async () => {
         socket.emitMessage({ type: 'ready' })
+        socket.emitMessage(AGENT_GREETING_AUDIO)
         await pending
       })
 
@@ -622,18 +930,18 @@ describe('useVoiceSession', () => {
       // Emit an agent audio chunk WITHOUT advancing past pendingTurnDelay.
       // Decode chain pushes onto the queue; pendingTurnDelay is set.
       // isPlayingRef remains false (playNextChunk hasn't been called yet
-      // because the 250ms timer is still pending).
+      // because the short first-chunk timer is still pending).
       await act(async () => {
         socket.emitMessage({
           type: 'audio',
           data: 'AAAAAA==',
           mime_type: 'audio/pcm;rate=24000',
         })
-        // Allow the decode promise to settle but stay BELOW the 250ms
+        // Allow the decode promise to settle but stay below the short
         // pendingTurnDelay so isPlayingRef remains false.
         await Promise.resolve()
         await Promise.resolve()
-        await new Promise((resolve) => setTimeout(resolve, 50))
+        await new Promise((resolve) => setTimeout(resolve, 5))
       })
 
       // At this point: isPlayingRef === false (timer pending),

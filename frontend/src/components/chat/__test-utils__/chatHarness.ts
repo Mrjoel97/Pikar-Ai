@@ -92,6 +92,19 @@ vi.mock('@/contexts/PersonaContext', () => ({
   usePersona: vi.fn(),
 }))
 
+vi.mock('next/navigation', () => ({
+  usePathname: vi.fn(() => '/dashboard/workspace'),
+  useRouter: vi.fn(() => ({
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+    push: vi.fn(),
+    refresh: vi.fn(),
+    replace: vi.fn(),
+  })),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
+}))
+
 // Supabase client stub — chainable so any incidental `.from(...).select(...)`
 // path inside the component (or the hooks it triggers post-mock) does not
 // throw. We DO NOT replicate the full supabase-js surface; behavior tests
@@ -209,12 +222,18 @@ export interface RenderChatOptions {
   addMessage?: ReturnType<typeof vi.fn>
   /** Override useAgentChat().sendMessage (default: a fresh vi.fn()). */
   sendMessage?: ReturnType<typeof vi.fn>
+  /** Override the useVoiceSession mock return value. */
+  voiceSession?: Record<string, unknown>
+  /** Override the useSpeechRecognition mock return value. */
+  speechRecognition?: Record<string, unknown>
   /**
    * Forwarded to <ChatInterface initialSessionId={...} />. Used by HOTFIX-06
    * persistence tests to assert that a restored session_id is forwarded into
    * useAgentChat as the first argument.
    */
   initialSessionId?: string
+  /** Forwarded to <ChatInterface initialPrompt={...} />. */
+  initialPrompt?: string
   /**
    * Per-test overrides for the SessionControlContext mock. Merges over the
    * harness default so callers only need to supply the fields they care about
@@ -354,6 +373,9 @@ function defaultVoiceSession() {
   // the fields ChatInterface reads.
   return {
     isConnected: false,
+    isAwaitingGreeting: false,
+    hasAgentStarted: false,
+    isReconnecting: false,
     isAgentSpeaking: false,
     agentTranscript: '',
     userTranscript: '',
@@ -423,6 +445,7 @@ function defaultPersona() {
     persona: null,
     setPersona: vi.fn(),
     isLoading: false,
+    agentLoaded: true,
     userId: null,
     userEmail: null,
     agentName: null,
@@ -474,6 +497,8 @@ export function renderChatInterface(
     })
   }
 
+  window.sessionStorage.removeItem('pikar:brainstorm-session:v1')
+
   // Resolve the mocks installed by the module-scope vi.mock calls above.
   const agentChat = defaultAgentChat(opts)
   const uploadFile =
@@ -492,9 +517,11 @@ export function renderChatInterface(
     defaultRealtimeSession() as never,
   )
   vi.mocked(useSpeechRecognition).mockReturnValue(
-    defaultSpeechRecognition() as never,
+    { ...defaultSpeechRecognition(), ...(opts.speechRecognition ?? {}) } as never,
   )
-  vi.mocked(useVoiceSession).mockReturnValue(defaultVoiceSession() as never)
+  vi.mocked(useVoiceSession).mockReturnValue(
+    { ...defaultVoiceSession(), ...(opts.voiceSession ?? {}) } as never,
+  )
   vi.mocked(useSessionControl).mockReturnValue(
     defaultSessionControl(opts.sessionControl) as never,
   )
@@ -517,7 +544,10 @@ export function renderChatInterface(
   const result = render(
     React.createElement(
       ChatInterface,
-      opts.initialSessionId ? { initialSessionId: opts.initialSessionId } : {},
+      {
+        ...(opts.initialSessionId ? { initialSessionId: opts.initialSessionId } : {}),
+        ...(opts.initialPrompt ? { initialPrompt: opts.initialPrompt } : {}),
+      },
     ),
   )
 

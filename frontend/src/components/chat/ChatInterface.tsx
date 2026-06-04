@@ -36,6 +36,7 @@ import { usePersona } from '@/contexts/PersonaContext'
 import { AGENT_BACKEND_URL } from '@/services/api'
 import { useSearchParams } from 'next/navigation';
 import { consumeVaultPrefill } from '@/lib/vaultPrefill';
+import { BRAIN_DUMP_LAUNCH_PARAM, isBrainDumpLaunchPrompt } from '@/lib/onboarding/navigation';
 
 interface ChatInterfaceProps {
   initialSessionId?: string;
@@ -66,6 +67,12 @@ type BrainstormStartMode = VoiceSessionStartMode
 
 const BRAINSTORM_SESSION_STORAGE_KEY = 'pikar:brainstorm-session:v1'
 const BRAINSTORM_SESSION_MAX_AGE_MS = 6 * 60 * 60 * 1000
+const BRAINSTORM_FINALIZE_TIMEOUT_MS = (() => {
+  const raw = process.env.NEXT_PUBLIC_BRAINDUMP_FINALIZE_TIMEOUT_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 4000;
+  return Math.min(8000, Math.max(1500, parsed));
+})();
 
 interface PersistedBrainstormSession {
   sessionId: string
@@ -252,6 +259,7 @@ export function ChatInterface({
   const brainstormStartModeRef = useRef<BrainstormStartMode>('resume');
   const brainstormConnectRequestRef = useRef(0);
   const restoreAttemptedRef = useRef(false);
+  const brainDumpLaunchAppliedRef = useRef(false);
   useEffect(() => { isBrainstormingRef.current = isBrainstorming; }, [isBrainstorming]);
 
   // Gemini Live API voice session for brainstorming
@@ -357,16 +365,6 @@ export function ChatInterface({
   useEffect(() => {
     initialPromptSentRef.current = false;
   }, [initialPrompt, initialSessionId, visibleSessionId]);
-
-  useEffect(() => {
-    const hasOnlyWelcomeMessage =
-      messages.length === 1 && messages[0]?.id === 'welcome-message';
-    if (initialPrompt && !initialPromptSentRef.current && !isLoadingHistory && (messages.length === 0 || hasOnlyWelcomeMessage)) {
-      initialPromptSentRef.current = true;
-      sendMessage(initialPrompt, agentMode);
-      onInitialPromptSent?.();
-    }
-  }, [initialPrompt, isLoadingHistory, messages, sendMessage, agentMode, onInitialPromptSent]);
 
   // Speech recognition hook
   const {
@@ -573,7 +571,7 @@ export function ChatInterface({
     const token = session?.access_token;
     if (!token) throw new Error('Authentication required to finalize brainstorm session');
 
-    const maxRetries = 3;
+    const maxRetries = 2;
     let lastError = '';
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -597,11 +595,14 @@ export function ChatInterface({
           return data as {
             success: boolean;
             validation_plan?: string;
+            transcript_markdown?: string;
             transcript_file_path?: string;
+            transcript_doc_id?: string;
             saved_categories?: string[];
             summary?: { title: string; key_themes: string[]; action_item_count: number; executive_summary: string };
             analysis_doc_id?: string;
             analysis_markdown?: string;
+            analysis_pending?: boolean;
           };
         }
         lastError = data?.error || data?.detail || `HTTP ${response.status}`;
@@ -611,9 +612,8 @@ export function ChatInterface({
         }
         lastError = getErrorMessage(err, 'Network error');
       }
-      // Exponential back-off: 1s, 2s
       if (attempt < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 400));
       }
     }
     throw new Error(lastError || 'Failed to finalize brainstorm session after retries');
@@ -654,21 +654,73 @@ export function ChatInterface({
         return;
       }
       voiceSession.disconnect();
-      setIsBrainstorming(false);
-      addMessage({
-        role: 'system',
-        text: `Live voice brainstorming could not connect${getErrorMessage(error) ? ` (${getErrorMessage(error)})` : ''}. Falling back to text brainstorming for this session.`,
-      });
-      // Fallback to text-based brainstorming if voice fails
-      const modeInstruction = startMode === 'fresh'
-        ? 'The user explicitly chose to start a fresh brainstorm. Use the onboarding/business context you already know, but do not anchor on the previous brainstorm thread unless the user asks you to.'
-        : 'The user wants to continue from their saved onboarding context and latest brainstorm context if available.';
-      sendMessage(
-        `[System: User has started a dedicated BRAINSTORMING SESSION. ${modeInstruction} Use the remembered onboarding/business context, the user's saved agent identity, and any relevant Knowledge Vault context before asking questions. Do not ask a blank-slate opener like "What do you have in mind?" Instead, acknowledge what you already know and ask one focused follow-up question. Do not create an initiative yet.]`,
-        'collab',
+      setIsBrainstorming(true);
+      console.warn(
+        '[ChatInterface] Live voice brainstorming could not start:',
+        getErrorMessage(error),
       );
     }
-  }, [addMessage, sendMessage, messages.length, getSessionId, voiceSession]);
+  }, [messages.length, getSessionId, voiceSession]);
+
+  useEffect(() => {
+    const hasOnlyWelcomeMessage =
+      messages.length === 1 && messages[0]?.id === 'welcome-message';
+    const canConsumeInitialPrompt =
+      initialPrompt
+      && !initialPromptSentRef.current
+      && !isLoadingHistory
+      && (messages.length === 0 || hasOnlyWelcomeMessage);
+
+    if (!canConsumeInitialPrompt) return;
+
+    initialPromptSentRef.current = true;
+    if (isBrainDumpLaunchPrompt(initialPrompt)) {
+      void handleStartBrainstorming('resume');
+    } else {
+      sendMessage(initialPrompt, agentMode);
+    }
+    onInitialPromptSent?.();
+  }, [
+    agentMode,
+    handleStartBrainstorming,
+    initialPrompt,
+    isLoadingHistory,
+    messages,
+    onInitialPromptSent,
+    sendMessage,
+  ]);
+
+  const brainDumpLaunchParam = searchParams?.get(BRAIN_DUMP_LAUNCH_PARAM) ?? null;
+  useEffect(() => {
+    brainDumpLaunchAppliedRef.current = false;
+  }, [brainDumpLaunchParam, initialSessionId, visibleSessionId]);
+
+  useEffect(() => {
+    if (brainDumpLaunchAppliedRef.current) return;
+    if (brainDumpLaunchParam !== '1') return;
+
+    brainDumpLaunchAppliedRef.current = true;
+    void handleStartBrainstorming('resume');
+
+    if (typeof window !== 'undefined') {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete(BRAIN_DUMP_LAUNCH_PARAM);
+      window.history.replaceState(
+        {},
+        '',
+        `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`,
+      );
+    }
+  }, [brainDumpLaunchParam, handleStartBrainstorming]);
+
+  const handleSuggestionSelect = useCallback((text: string) => {
+    if (isBrainDumpLaunchPrompt(text)) {
+      void handleStartBrainstorming('resume');
+      return;
+    }
+
+    sendMessage(text, agentMode);
+  }, [agentMode, handleStartBrainstorming, sendMessage]);
 
   const handleAbortBrainstormFinalize = useCallback(() => {
     const controller = finalizeAbortControllerRef.current;
@@ -708,23 +760,30 @@ export function ChatInterface({
         success: false,
         transcript_markdown: null,
         transcript_file_path: null,
+        transcript_doc_id: null,
         saved_categories: [],
         error: 'No conversation was captured. Try speaking after the agent greets you.',
         summary: null,
         analysis_doc_id: null,
         analysis_markdown: null,
+        analysis_pending: false,
       });
       return;
     }
 
     addMessage({
       role: 'system',
-      text: 'Brainstorm session finalized. Saving transcript and generating your comprehensive analysis...',
+      text: 'Brainstorm session finalized. Saving the transcript now; the analysis can finish in the background.',
     });
 
     setIsFinalizingBrainstorm(true);
     const finalizeAbortController = new AbortController();
     finalizeAbortControllerRef.current = finalizeAbortController;
+    let finalizeTimedOut = false;
+    const finalizeTimeout = window.setTimeout(() => {
+      finalizeTimedOut = true;
+      finalizeAbortController.abort();
+    }, BRAINSTORM_FINALIZE_TIMEOUT_MS);
     try {
       const result = await finalizeBrainstormSession({
         sessionId,
@@ -738,8 +797,36 @@ export function ChatInterface({
 
       addMessage({
         role: 'system',
-        text: `Saved to Brain Dumps (${(result.saved_categories || []).join(', ') || 'Brain Dump Analysis'}). You can review them in the workspace.`,
+        text: [
+          `Saved to Brain Dumps (${(result.saved_categories || []).join(', ') || 'Brain Dump Transcript'}).`,
+          result.transcript_doc_id ? `Transcript document ID: ${result.transcript_doc_id}.` : '',
+          result.analysis_pending
+            ? 'Full analysis is preparing in the background; the transcript is available now.'
+            : 'You can review the analysis in the workspace.',
+        ].filter(Boolean).join(' '),
       });
+
+      if (result.transcript_doc_id) {
+        addMessage({
+          role: 'system',
+          text: [
+            '[Brainstorm transcript saved]',
+            `Session ID: ${sessionId}`,
+            `Transcript document ID: ${result.transcript_doc_id}`,
+            'When the user asks about this brainstorm, use get_braindump_document with the transcript document ID before answering.',
+            '',
+            result.transcript_markdown || transcript,
+          ].join('\n'),
+        });
+      }
+
+      if (result.analysis_pending) {
+        addMessage({
+          role: 'agent',
+          text: 'Your brainstorm transcript is saved and I can use it now. I am preparing the polished analysis in the background, so you can already ask me about what we discussed.',
+          agentName: agentName ?? undefined,
+        });
+      }
 
       // Push analysis widget to workspace if we have markdown content
       if (result.analysis_markdown && result.analysis_doc_id && currentUserId) {
@@ -772,7 +859,7 @@ export function ChatInterface({
       }
 
       // Show summary card in chat
-      if (result.summary) {
+      if (!result.analysis_pending && result.summary) {
         const themes = (result.summary.key_themes || []).join(' · ');
         const summaryText = [
           `**🧠 Brain Dump Analysis: ${result.summary.title}**`,
@@ -788,23 +875,59 @@ export function ChatInterface({
           text: summaryText,
           agentName: agentName ?? undefined,
         });
-      } else {
+      } else if (!result.analysis_pending) {
         addMessage({
           role: 'agent',
-          text: 'Your brainstorming session was finalized and saved. Ask me to continue with validation or research when you are ready.',
+          text: 'Your brainstorming session transcript was saved. Ask me to continue with validation or research when you are ready.',
           agentName: agentName ?? undefined,
         });
       }
     } catch (error) {
       if (
         brainstormFinalizeCanceledRef.current
-        || (error instanceof DOMException && error.name === 'AbortError')
-      ) {
+        ) {
         addMessage({
           role: 'system',
-          text: 'Brainstorm finalization canceled. Transcript was not saved.',
+          text: 'Brainstorm finalization canceled. The live session may still auto-save the raw transcript.',
         });
         setFinalizeResult(null);
+        return;
+      }
+      if (
+        finalizeTimedOut
+        || (error instanceof DOMException && error.name === 'AbortError')
+      ) {
+        setFinalizeResult({
+          success: true,
+          transcript_markdown: transcript,
+          transcript_file_path: null,
+          transcript_doc_id: null,
+          saved_categories: [],
+          error: null,
+          summary: null,
+          analysis_doc_id: null,
+          analysis_markdown: null,
+          analysis_pending: true,
+        });
+        addMessage({
+          role: 'system',
+          text: 'Brainstorm transcript captured. Saving is taking longer than expected, so I released the session UI; the server will continue best-effort auto-save in the background.',
+        });
+        addMessage({
+          role: 'system',
+          text: [
+            '[Brainstorm transcript captured locally]',
+            `Session ID: ${sessionId}`,
+            'Use this transcript as context if the user wants to continue before the vault artifact appears.',
+            '',
+            transcript,
+          ].join('\n'),
+        });
+        addMessage({
+          role: 'agent',
+          text: 'I captured the brainstorm, so we can keep going without waiting on the save step. What part of the idea should we sharpen next?',
+          agentName: agentName ?? undefined,
+        });
         return;
       }
       console.error('Failed to finalize brainstorming session:', error);
@@ -812,11 +935,13 @@ export function ChatInterface({
         success: false,
         transcript_markdown: transcript || null,
         transcript_file_path: null,
+        transcript_doc_id: null,
         saved_categories: [],
         error: 'Analysis generation failed. Your transcript was saved.',
         summary: null,
         analysis_doc_id: null,
         analysis_markdown: null,
+        analysis_pending: false,
       });
       addMessage({
         role: 'system',
@@ -826,6 +951,7 @@ export function ChatInterface({
         sendMessage(`[System: User has CONCLUDED the brainstorming session.\n\nHere is the transcript of the session:\n\n${transcript}\n\nContext: User ID: ${currentUserId}\n\nPlease analyze this using 'process_brainstorm_conversation' and generate a Validation Plan.]`, 'auto');
       }
     } finally {
+      window.clearTimeout(finalizeTimeout);
       finalizeAbortControllerRef.current = null;
       brainstormFinalizeCanceledRef.current = false;
       setIsFinalizingBrainstorm(false);
@@ -1665,7 +1791,7 @@ export function ChatInterface({
                 <SuggestionChips
                   persona={persona || 'solopreneur'}
                   visible={!isRecording && !isSpeechTranscribing && !isUploading && !isStreaming && input.trim().length === 0 && messages.length === 0}
-                  onSelect={(text) => sendMessage(text, agentMode)}
+                  onSelect={handleSuggestionSelect}
                 />
               </div>
               {!isRecording && !isSpeechTranscribing && !isUploading && !isStreaming && messages.length === 0 && (
@@ -1884,6 +2010,8 @@ export function ChatInterface({
       {(isBrainstorming || isFinalizingBrainstorm || finalizeResult) && (
         <VoiceBrainstormOverlay
           isConnected={voiceSession.isConnected}
+          isAwaitingGreeting={voiceSession.isAwaitingGreeting}
+          isReconnecting={voiceSession.isReconnecting}
           isAgentSpeaking={voiceSession.isAgentSpeaking}
           transcriptTurns={voiceSession.transcriptTurns}
           remainingSeconds={voiceSession.remainingSeconds}
@@ -1968,8 +2096,8 @@ function BrainDumpMenu({
 
   useEffect(() => {
     if (!isStartMenuOpen) {
-      setStartMenuPosition(null);
-      return;
+      const timer = window.setTimeout(() => setStartMenuPosition(null), 0);
+      return () => window.clearTimeout(timer);
     }
 
     updateStartMenuPosition();
@@ -2009,27 +2137,31 @@ function BrainDumpMenu({
   // Brainstorm session timer
   useEffect(() => {
     if (isBrainstorming) {
-      setBrainstormDuration(0);
+      const resetTimer = window.setTimeout(() => setBrainstormDuration(0), 0);
       brainstormTimerRef.current = setInterval(() => setBrainstormDuration(p => p + 1), 1000);
+      return () => {
+        window.clearTimeout(resetTimer);
+        if (brainstormTimerRef.current) {
+          clearInterval(brainstormTimerRef.current);
+          brainstormTimerRef.current = null;
+        }
+      };
     } else {
       if (brainstormTimerRef.current) {
         clearInterval(brainstormTimerRef.current);
         brainstormTimerRef.current = null;
       }
-      setBrainstormDuration(0);
+      const resetTimer = window.setTimeout(() => setBrainstormDuration(0), 0);
+      return () => window.clearTimeout(resetTimer);
     }
-    return () => {
-      if (brainstormTimerRef.current) {
-        clearInterval(brainstormTimerRef.current);
-        brainstormTimerRef.current = null;
-      }
-    };
   }, [isBrainstorming]);
 
   // Local countdown from server's remainingSeconds (ticks down each second)
   const [localCountdown, setLocalCountdown] = useState<number | null>(null);
   useEffect(() => {
-    if (remainingSeconds !== null) setLocalCountdown(remainingSeconds);
+    if (remainingSeconds === null) return;
+    const timer = window.setTimeout(() => setLocalCountdown(remainingSeconds), 0);
+    return () => window.clearTimeout(timer);
   }, [remainingSeconds]);
   useEffect(() => {
     if (localCountdown === null || localCountdown <= 0) return;

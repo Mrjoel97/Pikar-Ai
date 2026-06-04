@@ -1,5 +1,5 @@
 ---
-phase: 109-workflow-node-editor-viewer
+phase: 123-workflow-node-editor-viewer
 plan: 01
 type: execute
 wave: 1
@@ -51,7 +51,7 @@ Output: Database schema ready for the Plan 02 API extension to expose the new fi
 </execution_context>
 
 <context>
-@.planning/phases/109-workflow-node-editor-viewer/109-CONTEXT.md
+@.planning/phases/123-workflow-node-editor-viewer/123-CONTEXT.md
 @docs/superpowers/specs/2026-05-11-workflow-node-editor-design.md
 @app/workflows/registry.py
 @supabase/migrations/20260511130000_workflow_run_view.sql

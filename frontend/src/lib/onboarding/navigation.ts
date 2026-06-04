@@ -13,7 +13,10 @@ const DASHBOARD_LAUNCH_PARAM_KEYS = [
   'fromJourney',
   'outcomesPrompt',
   'braindump_id',
+  'start_braindump',
 ] as const
+
+export const BRAIN_DUMP_LAUNCH_PARAM = 'start_braindump'
 
 export interface DashboardLaunchRequest {
   key: string
@@ -23,6 +26,20 @@ export interface DashboardLaunchRequest {
 function normalizePrompt(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
+}
+
+export function isBrainDumpLaunchPrompt(value: string | null | undefined): boolean {
+  const normalized = normalizePrompt(value)
+    ?.toLowerCase()
+    .replace(/[\s_-]+/g, ' ')
+
+  if (!normalized) return false
+
+  return (
+    normalized.includes('brain dump')
+    || normalized.includes('braindump')
+    || normalized.includes('brainstorm')
+  )
 }
 
 export function getPersonaChatRoute(persona: PersonaType): string {
@@ -41,6 +58,11 @@ export function buildChatLaunchUrl(
   const normalizedPrompt = normalizePrompt(prompt)
   if (!normalizedPrompt) {
     return route
+  }
+
+  if (isBrainDumpLaunchPrompt(normalizedPrompt)) {
+    const params = new URLSearchParams({ [BRAIN_DUMP_LAUNCH_PARAM]: '1' })
+    return `${route}?${params.toString()}`
   }
 
   const params = new URLSearchParams({ initialPrompt: normalizedPrompt })
@@ -62,7 +84,7 @@ export function extractDashboardLaunchRequest(
   if (braindumpId) {
     return {
       key: `braindump:${braindumpId}`,
-      prompt: `I want to continue working on my brain dump. The brain dump ID is ${braindumpId}. Please use the get_braindump_document tool to retrieve the exact document by ID, then help me continue validation and research based on its contents.`,
+      prompt: `I want to continue working on my brain dump. The vault document ID is ${braindumpId}. Please use get_braindump_document with that exact ID to retrieve the markdown before answering, then help me continue validation and research based on its contents.`,
     }
   }
 

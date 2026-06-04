@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { BRAIN_DUMP_LAUNCH_PARAM } from '@/lib/onboarding/navigation';
 import { PersonaType, PERSONA_INFO } from '@/services/onboarding';
 import {
   submitBusinessContext,
@@ -126,6 +127,11 @@ export function OnboardingTransition({
 
       // Navigate to dashboard with first action as initial prompt
       setTimeout(() => {
+        if (firstActionId === 'brain_dump') {
+          router.push(`/dashboard/workspace?${BRAIN_DUMP_LAUNCH_PARAM}=1`);
+          return;
+        }
+
         const encodedPrompt = encodeURIComponent(firstAction);
         router.push(`/dashboard/command-center?initialPrompt=${encodedPrompt}`);
       }, 1500);

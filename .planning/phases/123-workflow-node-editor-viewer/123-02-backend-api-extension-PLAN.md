@@ -1,9 +1,9 @@
 ---
-phase: 109-workflow-node-editor-viewer
+phase: 123-workflow-node-editor-viewer
 plan: 02
 type: execute
 wave: 1
-depends_on: [109-01]
+depends_on: [123-01]
 files_modified:
   - app/workflows/registry.py
   - app/routers/workflows.py
@@ -71,8 +71,8 @@ Output: The frontend can call `await listWorkflowTemplates()` and receive `templ
 </execution_context>
 
 <context>
-@.planning/phases/109-workflow-node-editor-viewer/109-CONTEXT.md
-@.planning/phases/109-workflow-node-editor-viewer/109-01-graph-projection-migration-PLAN.md
+@.planning/phases/123-workflow-node-editor-viewer/123-CONTEXT.md
+@.planning/phases/123-workflow-node-editor-viewer/123-01-graph-projection-migration-PLAN.md
 @docs/superpowers/specs/2026-05-11-workflow-node-editor-design.md
 @app/workflows/registry.py
 @app/routers/workflows.py

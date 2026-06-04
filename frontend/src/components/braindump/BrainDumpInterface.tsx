@@ -23,6 +23,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import {
+    downloadVaultStorageFile,
+    getVaultSignedUrl,
+} from '@/lib/vaultDownload';
 import { createInitiativeFromBraindump } from '@/services/initiatives';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -170,18 +174,12 @@ export function BrainDumpInterface() {
 
         const fetchContent = async () => {
             try {
-                const { data, error } = await supabase.storage
-                    .from('knowledge-vault')
-                    .createSignedUrl(doc.file_path, 3600);
-
-                if (error) throw error;
-
-                const signedUrl = (data as { signedUrl?: string; signedURL?: string }).signedUrl
-                    ?? (data as { signedURL?: string }).signedURL;
-
-                if (!signedUrl) throw new Error('Failed to get signed URL');
-
+                const signedUrl = await getVaultSignedUrl({
+                    bucket: 'knowledge-vault',
+                    path: doc.file_path,
+                });
                 const response = await fetch(signedUrl);
+                if (!response.ok) throw new Error(`Failed to load content (${response.status})`);
                 const text = await response.text();
                 setContent(text);
 
@@ -209,26 +207,11 @@ export function BrainDumpInterface() {
     const handleDownload = async () => {
         if (!selectedDoc) return;
         try {
-            const { data, error } = await supabase.storage
-                .from('knowledge-vault')
-                .createSignedUrl(selectedDoc.file_path, 60);
-
-            if (error) throw error;
-            const signedUrl = (data as { signedUrl?: string; signedURL?: string }).signedUrl
-                ?? (data as { signedURL?: string }).signedURL;
-            if (!signedUrl) throw new Error('No signed URL returned');
-
-            const response = await fetch(signedUrl);
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = selectedDoc.filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            await downloadVaultStorageFile({
+                bucket: 'knowledge-vault',
+                path: selectedDoc.file_path,
+                filename: selectedDoc.filename,
+            });
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             console.error('Download error:', error);
@@ -311,7 +294,14 @@ export function BrainDumpInterface() {
                         <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-8 text-center">
                             <Inbox className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                             <p className="text-slate-600 font-medium">No brain dumps yet</p>
-                            <p className="text-slate-500 text-sm mt-1">Use the <span className="font-semibold text-indigo-600">Brain icon</span> in chat and select <span className="font-semibold">&quot;Discuss with Agent&quot;</span> to start.</p>
+                            <p className="text-slate-500 text-sm mt-1">Start a live conversation and Pikar will save the transcript here.</p>
+                            <Link
+                                href="/dashboard/workspace?start_braindump=1"
+                                className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-700"
+                            >
+                                <Brain size={16} />
+                                Start brain dump
+                            </Link>
                         </div>
                     ) : (
                         <div className="space-y-3">
