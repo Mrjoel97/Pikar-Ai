@@ -29,6 +29,26 @@ type EventPart = {
   }
 }
 
+type SessionHistoryEventData = {
+  author?: unknown
+  source?: unknown
+  content?: unknown
+  widget?: unknown
+}
+
+function getEventData(value: unknown): SessionHistoryEventData {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  return value as SessionHistoryEventData
+}
+
+function getEventActor(event: SessionHistoryEventData): string | undefined {
+  const actor = event.author ?? event.source
+  return typeof actor === 'string' ? actor : undefined
+}
+
 function getEventParts(content: unknown): EventPart[] | null {
   if (!content || typeof content !== 'object' || Array.isArray(content)) {
     return null
@@ -127,8 +147,8 @@ export async function loadSessionHistory(
   const historyMessages: Message[] = [];
 
   orderedEvents.forEach((eventRow: SessionEvent) => {
-    const event = eventRow.event_data || {};
-    const who = event?.author ?? event?.source;
+    const event = getEventData(eventRow.event_data);
+    const who = getEventActor(event);
 
     // --- User messages ---
     if (who === 'user') {
