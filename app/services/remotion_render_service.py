@@ -2,6 +2,7 @@
 # Server-side Remotion render: produce MP4 from scenes (text + duration) and upload to vault.
 # Optional: set REMOTION_RENDER_ENABLED=1 and ensure remotion-render package is installed.
 
+import base64
 import copy
 import json
 import logging
@@ -12,8 +13,10 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote_to_bytes, urlsplit
 from urllib.request import urlopen
+
+from app.services import audio_music_service
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +99,12 @@ def _summarize_props(props: dict[str, Any] | None) -> dict[str, Any]:
             for scene in scenes
             if isinstance(scene, dict) and scene.get("voiceoverUrl")
         ),
+        "source_audio_scene_count": sum(
+            1
+            for scene in scenes
+            if isinstance(scene, dict) and scene.get("useSourceAudio")
+        ),
+        "include_audio": data.get("includeAudio", True),
         "has_bg_music": bool(data.get("bgMusicUrl")),
     }
 
@@ -206,6 +215,57 @@ def _resolve_ffmpeg_cli(render_dir: Path) -> str | None:
     return shutil.which("ffmpeg")
 
 
+def _resolve_ffprobe_cli(ffmpeg_cli: str | None = None) -> str | None:
+    if ffmpeg_cli:
+        candidate = Path(ffmpeg_cli).with_name(
+            "ffprobe.exe" if os.name == "nt" else "ffprobe"
+        )
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("ffprobe")
+
+
+def _media_has_audio(ffmpeg_cli: str, media_path: Path) -> bool:
+    ffprobe_cli = _resolve_ffprobe_cli(ffmpeg_cli)
+    if not ffprobe_cli:
+        return False
+    try:
+        result = _run_command(
+            [
+                ffprobe_cli,
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+                str(media_path),
+            ],
+            timeout=30,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0 and bool((result.stdout or "").strip())
+
+
+def _path_from_file_reference(value: str) -> Path | None:
+    ref = str(value or "").strip()
+    if not ref:
+        return None
+    if ref.lower().startswith("file://"):
+        parsed = urlsplit(ref)
+        path = unquote_to_bytes(parsed.path).decode("utf-8", errors="replace")
+        if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+            path = path[1:]
+        return Path(path)
+    candidate = Path(ref)
+    if candidate.is_file():
+        return candidate
+    return None
+
+
 def _build_render_command(
     *,
     render_dir: Path,
@@ -303,6 +363,13 @@ def _mime_suffix(mime_type: str | None, default_suffix: str) -> str:
 
 
 def _download_asset(url: str, destination: Path) -> None:
+    if url.startswith("data:"):
+        _header, payload = url.split(",", 1)
+        if ";base64" in _header:
+            destination.write_bytes(base64.b64decode(payload))
+        else:
+            destination.write_bytes(unquote_to_bytes(payload))
+        return
     with urlopen(url, timeout=120) as response:
         destination.write_bytes(response.read())
 
@@ -338,6 +405,9 @@ def _materialize_scene_asset(
 
     asset_url = str(scene.get(url_key) or "").strip()
     if asset_url:
+        local_asset = _path_from_file_reference(asset_url)
+        if local_asset and local_asset.is_file():
+            return local_asset, "local_path"
         destination = (
             work_dir
             / f"scene-{index:03d}-{label}{_asset_suffix(asset_url, default_suffix)}"
@@ -365,11 +435,44 @@ def _scenes_from_prompt(
     ]
 
 
+def _props_include_audio(props: dict[str, Any]) -> bool:
+    return bool(props.get("includeAudio", True))
+
+
+def _props_have_declared_audio(props: dict[str, Any]) -> bool:
+    scenes = props.get("scenes") if isinstance(props.get("scenes"), list) else []
+    return bool(
+        props.get("bgMusicUrl")
+        or props.get("bgMusicPath")
+        or props.get("bgMusicBytes")
+        or any(
+            isinstance(scene, dict)
+            and (
+                scene.get("voiceoverUrl")
+                or scene.get("voiceoverBytes")
+                or scene.get("voiceoverPath")
+                or scene.get("useSourceAudio")
+            )
+            for scene in scenes
+        )
+    )
+
+
+def _prepare_audio_props(props: dict[str, Any]) -> dict[str, Any]:
+    prepared = dict(props)
+    prepared["includeAudio"] = _props_include_audio(prepared)
+    if prepared["includeAudio"] and not _props_have_declared_audio(prepared):
+        prepared["bgMusicUrl"] = audio_music_service.select_background_music_url(None)
+        prepared.setdefault("bgMusicVolume", 0.35)
+    return prepared
+
+
 def render_scenes_to_mp4(
     prompt: str,
     duration_seconds: int,
     user_id: str,
     image_url: str | None = None,
+    include_audio: bool = True,
 ) -> tuple[bytes | None, str | None]:
     """
     Render a programmatic video (scenes from prompt) to MP4 using the remotion-render package.
@@ -382,7 +485,11 @@ def render_scenes_to_mp4(
         "scenes": _scenes_from_prompt(prompt, duration_seconds, image_url),
         "fps": fps,
         "durationInFrames": duration_in_frames,
+        "includeAudio": include_audio,
     }
+    if include_audio:
+        props["bgMusicUrl"] = audio_music_service.select_background_music_url(None)
+        props["bgMusicVolume"] = 0.35
     props_summary = _summarize_props(props)
     clear_last_render_diagnostics()
 
@@ -603,6 +710,9 @@ def _render_scene_segment(
     fps: int,
     width: int,
     height: int,
+    include_audio: bool,
+    bg_music_path: Path | None = None,
+    bg_music_volume: float = 0.35,
 ) -> tuple[Path, dict[str, str]]:
     duration = max(1, int(scene.get("duration") or 4))
     source_path, source_origin = _materialize_scene_asset(
@@ -627,26 +737,52 @@ def _render_scene_segment(
     if source_path is None:
         raise ValueError(f"Scene {index} is missing both video and image assets")
 
-    audio_path, audio_origin = _materialize_scene_asset(
-        work_dir=work_dir,
-        scene=scene,
-        index=index,
-        label="audio",
-        url_key="voiceoverUrl",
-        bytes_key="voiceoverBytes",
-        path_key="voiceoverPath",
-        default_suffix=".mp3",
-        mime_type=scene.get("voiceoverMimeType"),
-    )
+    audio_path: Path | None = None
+    audio_origin: str | None = None
+    if include_audio:
+        audio_path, audio_origin = _materialize_scene_asset(
+            work_dir=work_dir,
+            scene=scene,
+            index=index,
+            label="audio",
+            url_key="voiceoverUrl",
+            bytes_key="voiceoverBytes",
+            path_key="voiceoverPath",
+            default_suffix=".mp3",
+            mime_type=scene.get("voiceoverMimeType"),
+        )
 
     segment_path = work_dir / f"scene-{index:03d}.mp4"
     command: list[str] = [ffmpeg_cli, "-y"]
-    if str(scene.get("videoUrl") or "").strip() or scene.get("videoBytes"):
+    has_video_source = bool(str(scene.get("videoUrl") or "").strip() or scene.get("videoBytes"))
+    if has_video_source:
         command.extend(["-stream_loop", "-1", "-i", str(source_path)])
     else:
         command.extend(["-loop", "1", "-i", str(source_path)])
+
+    audio_map = "1:a:0"
+    audio_filter = f"apad=pad_dur={duration},atrim=0:{duration}"
     if audio_path is not None:
         command.extend(["-i", str(audio_path)])
+    elif include_audio and has_video_source and _media_has_audio(ffmpeg_cli, source_path):
+        audio_map = "0:a:0"
+        audio_origin = "source_audio"
+    elif include_audio and bg_music_path is not None:
+        command.extend(["-stream_loop", "-1", "-i", str(bg_music_path)])
+        audio_origin = "background_music"
+        audio_filter = (
+            f"volume={bg_music_volume},apad=pad_dur={duration},atrim=0:{duration}"
+        )
+    elif include_audio:
+        command.extend(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"sine=frequency=220:sample_rate={FFMPEG_RENDER_SAMPLE_RATE}",
+            ]
+        )
+        audio_origin = "generated_tone"
     else:
         command.extend(
             [
@@ -656,6 +792,7 @@ def _render_scene_segment(
                 f"anullsrc=channel_layout=stereo:sample_rate={FFMPEG_RENDER_SAMPLE_RATE}",
             ]
         )
+        audio_origin = "silence"
     command.extend(
         [
             "-t",
@@ -663,13 +800,13 @@ def _render_scene_segment(
             "-map",
             "0:v:0",
             "-map",
-            "1:a:0",
+            audio_map,
             "-vf",
             _ffmpeg_video_filter(width=width, height=height, fps=fps),
             "-r",
             str(fps),
             "-af",
-            f"apad=pad_dur={duration},atrim=0:{duration}",
+            audio_filter,
             "-c:v",
             "libx264",
             "-preset",
@@ -707,6 +844,7 @@ def render_programmatic_video_ffmpeg(
     user_id: str,
 ) -> tuple[bytes | None, str | None]:
     """Render a long-form video by turning scenes into normalized MP4 segments and concatenating them."""
+    props = _prepare_audio_props(props)
     props_summary = _summarize_props(props)
     clear_last_render_diagnostics()
 
@@ -737,10 +875,34 @@ def render_programmatic_video_ffmpeg(
 
     asset_id = str(uuid.uuid4())
     fps = max(1, int(props.get("fps") or 24))
+    include_audio = _props_include_audio(props)
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
         out_path = work_dir / "out.mp4"
         concat_path = work_dir / "concat.txt"
+        bg_music_path: Path | None = None
+        bg_music_origin: str | None = None
+        if include_audio and (
+            props.get("bgMusicUrl") or props.get("bgMusicBytes") or props.get("bgMusicPath")
+        ):
+            try:
+                bg_music_path, bg_music_origin = _materialize_scene_asset(
+                    work_dir=work_dir,
+                    scene={
+                        "bgMusicUrl": props.get("bgMusicUrl"),
+                        "bgMusicBytes": props.get("bgMusicBytes"),
+                        "bgMusicPath": props.get("bgMusicPath"),
+                    },
+                    index=0,
+                    label="bg-music",
+                    url_key="bgMusicUrl",
+                    bytes_key="bgMusicBytes",
+                    path_key="bgMusicPath",
+                    default_suffix=".mp3",
+                    mime_type=props.get("bgMusicMimeType") or "audio/mpeg",
+                )
+            except Exception as exc:
+                logger.warning("Background music materialization failed: %s", exc)
         _record_render_diagnostics(
             render_mode="ffmpeg_concat",
             status="running",
@@ -761,6 +923,9 @@ def render_programmatic_video_ffmpeg(
                     fps=fps,
                     width=FFMPEG_RENDER_WIDTH,
                     height=FFMPEG_RENDER_HEIGHT,
+                    include_audio=include_audio,
+                    bg_music_path=bg_music_path,
+                    bg_music_volume=float(props.get("bgMusicVolume") or 0.35),
                 )
                 for index, scene in enumerate(scenes)
             ]
@@ -785,6 +950,10 @@ def render_programmatic_video_ffmpeg(
                 for _segment_path, origins in segment_results
                 if origins.get("audio_origin") == "remote_url"
             )
+            audio_origin_counts: dict[str, int] = {}
+            for _segment_path, origins in segment_results:
+                origin = origins.get("audio_origin") or "missing"
+                audio_origin_counts[origin] = audio_origin_counts.get(origin, 0) + 1
             _write_concat_manifest(concat_path, segment_paths)
             concat_command = [
                 ffmpeg_cli,
@@ -840,11 +1009,13 @@ def render_programmatic_video_ffmpeg(
                     props_summary=props_summary,
                     user_id=user_id,
                     renderer="ffmpeg",
-                    bg_music_omitted=bool(props.get("bgMusicUrl")),
+                    include_audio=include_audio,
+                    bg_music_origin=bg_music_origin,
                     local_scene_source_count=local_scene_source_count,
                     remote_scene_source_count=remote_scene_source_count,
                     local_audio_source_count=local_audio_source_count,
                     remote_audio_source_count=remote_audio_source_count,
+                    audio_origin_counts=audio_origin_counts,
                 )
                 return None, None
             mp4_bytes = out_path.read_bytes()
@@ -861,11 +1032,13 @@ def render_programmatic_video_ffmpeg(
                 user_id=user_id,
                 output_size_bytes=len(mp4_bytes),
                 renderer="ffmpeg",
-                bg_music_omitted=bool(props.get("bgMusicUrl")),
+                include_audio=include_audio,
+                bg_music_origin=bg_music_origin,
                 local_scene_source_count=local_scene_source_count,
                 remote_scene_source_count=remote_scene_source_count,
                 local_audio_source_count=local_audio_source_count,
                 remote_audio_source_count=remote_audio_source_count,
+                audio_origin_counts=audio_origin_counts,
             )
             return mp4_bytes, asset_id
         except subprocess.TimeoutExpired as exc:
@@ -906,6 +1079,7 @@ def render_programmatic_video(
     Expects props to match GeneratedVideoInputProps interface (scenes, fps, bgMusicUrl).
     Returns (mp4_bytes, asset_id).
     """
+    props = _prepare_audio_props(props)
     props_summary = _summarize_props(props)
     clear_last_render_diagnostics()
 

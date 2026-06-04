@@ -89,6 +89,38 @@ def test_normalize_storyboard_preserves_render_type(director: DirectorService):
     assert normalized["scenes"][1]["render_type"] == "veo"
 
 
+def test_normalize_storyboard_fills_voiceover_text_by_default(
+    director: DirectorService,
+):
+    storyboard = {
+        "scenes": [
+            {"description": "Hero product reveal with slow camera move", "duration": 4}
+        ],
+    }
+
+    normalized = director._normalize_storyboard(storyboard, "launch prompt")
+
+    assert normalized["scenes"][0]["text"]
+
+
+def test_normalize_storyboard_can_keep_audio_empty_when_disabled(
+    director: DirectorService,
+):
+    storyboard = {
+        "scenes": [
+            {"description": "Hero product reveal with slow camera move", "duration": 4}
+        ],
+    }
+
+    normalized = director._normalize_storyboard(
+        storyboard,
+        "launch prompt",
+        include_audio=False,
+    )
+
+    assert normalized["scenes"][0]["text"] == ""
+
+
 def test_normalize_storyboard_caps_veo_for_long_videos(director: DirectorService):
     storyboard = {
         "scenes": [
@@ -450,6 +482,34 @@ async def test_process_scene_imagen_path_skips_video_generation(
     assert scene["image_url"] == "https://example.com/scene.png"
     image_helper.assert_awaited_once()
     video_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_scene_can_disable_audio_generation(director: DirectorService):
+    with (
+        patch(
+            "app.services.director_service.vertex_video_service.generate_video",
+            return_value={
+                "success": True,
+                "video_bytes": b"video-bytes",
+                "video_url": None,
+            },
+        ) as video_mock,
+        patch(
+            "app.services.director_service.voiceover_service.synthesize_speech",
+        ) as tts_mock,
+    ):
+        scene = await director._process_scene(
+            0,
+            {"description": "desc", "text": "caption", "duration": 4},
+            "user-1",
+            include_audio=False,
+        )
+
+    assert scene is not None
+    assert scene["voiceover_url"] is None
+    assert video_mock.call_args.kwargs["include_audio"] is False
+    tts_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

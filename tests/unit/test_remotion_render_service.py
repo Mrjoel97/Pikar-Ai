@@ -1,7 +1,38 @@
 import importlib
+import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+_TEST_IMAGE_PATH = Path(__file__).resolve().parents[2] / "frontend" / "public" / "pikar-logo.png"
+
+
+def _audio_streams_for_bytes(work_dir: Path, mp4_bytes: bytes) -> list[str]:
+    video_path = work_dir / "out.mp4"
+    video_path.write_bytes(mp4_bytes)
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            str(video_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 def test_build_render_cli_args_reads_env(monkeypatch):
     monkeypatch.setenv("REMOTION_RENDER_SCALE", "0.5")
@@ -187,3 +218,76 @@ def test_materialize_scene_asset_prefers_local_bytes():
     assert captured["payload"] == b"image-bytes"
     assert origin == "local_bytes"
     download_mock.assert_not_called()
+
+
+def test_ffmpeg_renderer_adds_audio_stream_when_required(monkeypatch):
+    import app.services.remotion_render_service as remotion_render_service
+
+    remotion_render_service = importlib.reload(remotion_render_service)
+    ffmpeg_cli = remotion_render_service._resolve_ffmpeg_cli(
+        Path(remotion_render_service.REMOTION_RENDER_DIR)
+    )
+    ffprobe_cli = remotion_render_service._resolve_ffprobe_cli(ffmpeg_cli)
+    if not ffmpeg_cli or not ffprobe_cli:
+        pytest.skip("ffmpeg/ffprobe unavailable")
+
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_WIDTH", 64)
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_HEIGHT", 36)
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_PRESET", "ultrafast")
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_TIMEOUT", 60)
+    monkeypatch.setattr(
+        remotion_render_service.audio_music_service,
+        "select_background_music_url",
+        lambda _mood: None,
+    )
+
+    mp4_bytes, asset_id = remotion_render_service.render_programmatic_video_ffmpeg(
+        {
+            "scenes": [{"duration": 1, "imagePath": str(_TEST_IMAGE_PATH)}],
+            "fps": 12,
+            "includeAudio": True,
+        },
+        "user-1",
+    )
+
+    assert asset_id
+    assert mp4_bytes
+    with tempfile.TemporaryDirectory(dir=Path.cwd() / "tmp") as tmp:
+        assert _audio_streams_for_bytes(Path(tmp), mp4_bytes) == ["audio"]
+    diagnostics = remotion_render_service.get_last_render_diagnostics()
+    assert diagnostics is not None
+    assert diagnostics["audio_origin_counts"] != {"silence": 1}
+
+
+def test_ffmpeg_renderer_uses_silence_only_when_audio_disabled(monkeypatch):
+    import app.services.remotion_render_service as remotion_render_service
+
+    remotion_render_service = importlib.reload(remotion_render_service)
+    ffmpeg_cli = remotion_render_service._resolve_ffmpeg_cli(
+        Path(remotion_render_service.REMOTION_RENDER_DIR)
+    )
+    ffprobe_cli = remotion_render_service._resolve_ffprobe_cli(ffmpeg_cli)
+    if not ffmpeg_cli or not ffprobe_cli:
+        pytest.skip("ffmpeg/ffprobe unavailable")
+
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_WIDTH", 64)
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_HEIGHT", 36)
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_PRESET", "ultrafast")
+    monkeypatch.setattr(remotion_render_service, "FFMPEG_RENDER_TIMEOUT", 60)
+
+    mp4_bytes, asset_id = remotion_render_service.render_programmatic_video_ffmpeg(
+        {
+            "scenes": [{"duration": 1, "imagePath": str(_TEST_IMAGE_PATH)}],
+            "fps": 12,
+            "includeAudio": False,
+        },
+        "user-1",
+    )
+
+    assert asset_id
+    assert mp4_bytes
+    with tempfile.TemporaryDirectory(dir=Path.cwd() / "tmp") as tmp:
+        assert _audio_streams_for_bytes(Path(tmp), mp4_bytes) == ["audio"]
+    diagnostics = remotion_render_service.get_last_render_diagnostics()
+    assert diagnostics is not None
+    assert diagnostics["audio_origin_counts"] == {"silence": 1}

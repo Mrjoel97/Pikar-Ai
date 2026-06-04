@@ -24,6 +24,7 @@ locals {
     "cloudtrace.googleapis.com",
     "telemetry.googleapis.com",
     "artifactregistry.googleapis.com",
+    "cloudscheduler.googleapis.com",
   ]
 
   deploy_project_services = [
@@ -70,6 +71,22 @@ locals {
     for name, _ in local.runtime_secret_values :
     name => "${var.project_name}-${lower(replace(name, "_", "-"))}"
   }
+
+  app_runtime_plain_env_values = merge(
+    {
+      REQUEST_TIMEOUT_SECONDS = tostring(var.request_timeout_seconds)
+      LONG_TASK_AUTO_PROMOTE  = "true"
+    },
+    var.runtime_plain_env_values,
+  )
+
+  worker_runtime_plain_env_values = merge(
+    local.app_runtime_plain_env_values,
+    {
+      WORKER_RUN_SECONDS           = tostring(var.worker_run_seconds)
+      WORKER_POLL_INTERVAL_SECONDS = tostring(var.worker_poll_interval_seconds)
+    },
+  )
 
 }
 

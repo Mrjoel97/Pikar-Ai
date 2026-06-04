@@ -59,6 +59,7 @@ async def test_execute_content_pipeline_uses_director_metadata_and_drafts_captio
     create_kwargs = director_instance.create_pro_video.await_args.kwargs
     assert create_kwargs["return_metadata"] is True
     assert create_kwargs["nano_banana_mode"] == "always"
+    assert create_kwargs["include_audio"] is True
 
     canva_tool.generate_social_post.assert_awaited_once()
     caption_text = canva_tool.generate_social_post.await_args.kwargs["text"]

@@ -62,6 +62,7 @@ variable "app_sa_roles" {
     "roles/storage.admin",
     "roles/serviceusage.serviceUsageConsumer",
     "roles/secretmanager.secretAccessor",
+    "roles/run.developer",
   ]
 }
 
@@ -188,4 +189,28 @@ variable "runtime_plain_env_values" {
   type        = map(string)
   description = "Additional non-sensitive runtime env vars to inject into Cloud Run as plain configuration."
   default     = {}
+}
+
+variable "request_timeout_seconds" {
+  type        = number
+  description = "Gunicorn worker timeout. Must exceed the longest inline Veo poll timeout."
+  default     = 700
+}
+
+variable "worker_run_seconds" {
+  type        = number
+  description = "How long each scheduled Cloud Run Job worker execution should poll before exiting."
+  default     = 55
+}
+
+variable "worker_poll_interval_seconds" {
+  type        = number
+  description = "Polling interval for the workflow worker loop."
+  default     = 5
+}
+
+variable "worker_schedule" {
+  type        = string
+  description = "Cloud Scheduler cron expression that triggers the worker Cloud Run Job."
+  default     = "* * * * *"
 }

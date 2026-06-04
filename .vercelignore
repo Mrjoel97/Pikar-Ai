@@ -1,7 +1,58 @@
-tmpmmtjcyle
+# VCS and local editor state
+.git
+.github
+.vscode
+.idea
+
+# Python/backend runtime artifacts
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+.ruff_cache
+.hypothesis
+.coverage
+*.log
+
+# Large local/generated workspaces
+.agent
+.claude
+.codex-*
+.planning
+.playwright-cli
+.playwright-mcp
+.pre-commit-hooks
+.tools
+.worktrees
+artifacts
+audit_output
+notebooks
+output
+plans
 tmp
 .tmp
+
+# Backend and infrastructure are deployed separately to Cloud Run
+/app
+/admin
+/deployment
+/docs
+/remotion-render
+/scripts
+/secrets
+/skills
+/supabase
+/tests
+
+# Frontend build/dependency outputs
 .next
-output
-tiktok-demo.mp4
-.playwright-cli
+node_modules
+frontend/.next
+frontend/node_modules
+frontend/coverage
+
+# Local env and binary scratch
+.env
+*.env
+*.mp4
+*.zip

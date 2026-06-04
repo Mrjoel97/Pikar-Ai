@@ -170,8 +170,25 @@ def _extract_storyboard_captions(storyboard: dict[str, Any] | None) -> list[str]
     return captions
 
 
+def _scene_audio_text(description: str, prompt: str, index: int) -> str:
+    """Create a concise fallback narration line for scenes that omit text."""
+    source = (description or prompt or "the story").strip()
+    source = " ".join(source.split())
+    if ":" in source:
+        source = source.split(":", 1)[-1].strip() or source
+    if "." in source:
+        source = source.split(".", 1)[0].strip() or source
+    source = source[:140].strip(" ,.;")
+    if not source:
+        source = f"Scene {index + 1}"
+    return source
+
+
 def _build_storyboard_system_prompt(
-    nano_banana_mode: str, target_duration_seconds: int = 30
+    nano_banana_mode: str,
+    target_duration_seconds: int = 30,
+    *,
+    include_audio: bool = True,
 ) -> str:
     """Build the Gemini storyboard system prompt with configurable style guidance."""
     mode = _normalize_nano_banana_mode(nano_banana_mode)
@@ -213,6 +230,12 @@ Use keywords like: "Octane render", "Unreal Engine 5 aesthetic", "high saturatio
             "- Keep the scene count as low as possible while still covering the full requested runtime.\n"
             "- Favor static image-backed coverage for the middle beats so generation finishes faster.\n"
         )
+    audio_requirement = (
+        "- Audio Requirement: every scene must include concise non-empty text suitable for voiceover narration and captions.\n"
+        "- Keep narration natural and brand-safe; avoid reading camera directions aloud.\n"
+        if include_audio
+        else "- Audio Requirement: the user requested no sound, so do not plan voiceover or soundtrack audio.\n"
+    )
 
     return f"""
 You are a world-class film director, cinematographer, and 3D technical artist.
@@ -240,6 +263,7 @@ Rules:
 - Scene duration must be 4, 6, or 8 seconds.
 {hybrid_rule}- Descriptions should be extremely visual and production-ready (camera movement, lighting, composition).
 - Ensure the scenes feel cohesive across the full ad.
+{audio_requirement}
 {speed_requirement}"""
 
 
@@ -301,6 +325,7 @@ class DirectorService:
         return_metadata: bool = False,
         nano_banana_mode: str = "always",
         target_duration_seconds: int = 30,
+        include_audio: bool = True,
     ) -> str | None | dict[str, Any]:
         """
         Orchestrates professional multi-scene video creation:
@@ -316,13 +341,17 @@ class DirectorService:
         await self._emit_progress(
             progress_callback,
             "planning_started",
-            {"target_duration_seconds": target_duration_seconds},
+            {
+                "target_duration_seconds": target_duration_seconds,
+                "include_audio": include_audio,
+            },
         )
 
         storyboard = await self._generate_storyboard(
             prompt,
             nano_banana_mode=nano_banana_mode,
             target_duration_seconds=target_duration_seconds,
+            include_audio=include_audio,
         )
         if not storyboard:
             logger.error("Failed to generate storyboard")
@@ -348,6 +377,7 @@ class DirectorService:
                 "storyboard_captions": storyboard_captions,
                 "nano_banana_mode": _normalize_nano_banana_mode(nano_banana_mode),
                 "target_duration_seconds": target_duration_seconds,
+                "include_audio": include_audio,
             },
         )
 
@@ -359,7 +389,12 @@ class DirectorService:
         ) -> dict[str, Any] | None:
             async with semaphore:
                 return await asyncio.wait_for(
-                    self._process_scene(index, scene, user_id),
+                    self._process_scene(
+                        index,
+                        scene,
+                        user_id,
+                        include_audio=include_audio,
+                    ),
                     timeout=self.scene_timeout_seconds,
                 )
 
@@ -401,10 +436,14 @@ class DirectorService:
             scene_count=len(valid_scenes),
         )
         render_scenes, total_duration_frames = self._build_render_scenes(
-            valid_scenes, renderer=renderer
+            valid_scenes, renderer=renderer, include_audio=include_audio
         )
 
-        bg_music_url = audio_music_service.select_background_music_url(mood)
+        bg_music_url = (
+            audio_music_service.select_background_music_url(mood)
+            if include_audio
+            else None
+        )
         props = {
             "scenes": render_scenes,
             "fps": self.fps,
@@ -412,6 +451,7 @@ class DirectorService:
             "bgMusicUrl": bg_music_url,
             "bgMusicVolume": 0.35,
             "voiceoverVolume": 1.0,
+            "includeAudio": include_audio,
         }
 
         logger.info(
@@ -518,6 +558,7 @@ class DirectorService:
                 "storyboard_captions": storyboard_captions,
                 "scene_count": len(valid_scenes),
                 "nano_banana_mode": _normalize_nano_banana_mode(nano_banana_mode),
+                "include_audio": include_audio,
                 "session_id": session_id,
                 "workflow_execution_id": workflow_execution_id,
             }
@@ -582,6 +623,7 @@ class DirectorService:
                 "scenes": valid_scenes,
                 "render_backend": renderer,
                 "nano_banana_mode": media_metadata["nano_banana_mode"],
+                "include_audio": include_audio,
                 "session_id": session_id,
                 "workflow_execution_id": workflow_execution_id,
             }
@@ -595,6 +637,7 @@ class DirectorService:
                     "scene_count": len(valid_scenes),
                     "render_backend": renderer,
                     "nano_banana_mode": result_payload["nano_banana_mode"],
+                    "include_audio": include_audio,
                 },
             )
             if return_metadata:
@@ -614,6 +657,7 @@ class DirectorService:
         valid_scenes: list[dict[str, Any]],
         *,
         renderer: str,
+        include_audio: bool,
     ) -> tuple[list[dict[str, Any]], int]:
         render_scenes: list[dict[str, Any]] = []
         total_duration_frames = 0
@@ -625,15 +669,28 @@ class DirectorService:
                 "duration": duration,
                 "videoUrl": scene.get("video_url"),
                 "imageUrl": scene.get("image_url"),
-                "voiceoverUrl": scene.get("voiceover_url"),
+                "voiceoverUrl": scene.get("voiceover_url") if include_audio else None,
+                "includeAudio": include_audio,
             }
+            has_voiceover = bool(
+                include_audio
+                and (scene.get("voiceover_url") or scene.get("voiceover_bytes"))
+            )
+            has_source_video = bool(scene.get("video_url") or scene.get("video_bytes"))
+            render_scene["useSourceAudio"] = bool(
+                include_audio and has_source_video and not has_voiceover
+            )
             if renderer == "ffmpeg":
                 render_scene.update(
                     {
                         "videoBytes": scene.get("video_bytes"),
                         "imageBytes": scene.get("image_bytes"),
-                        "voiceoverBytes": scene.get("voiceover_bytes"),
-                        "voiceoverMimeType": scene.get("voiceover_mime_type"),
+                        "voiceoverBytes": scene.get("voiceover_bytes")
+                        if include_audio
+                        else None,
+                        "voiceoverMimeType": scene.get("voiceover_mime_type")
+                        if include_audio
+                        else None,
                     }
                 )
             else:
@@ -675,6 +732,7 @@ class DirectorService:
         prompt: str,
         nano_banana_mode: str = "always",
         target_duration_seconds: int = 30,
+        include_audio: bool = True,
     ) -> dict[str, Any]:
         """Use Gemini to create a storyboard, with model fallback and synthetic last resort.
 
@@ -683,7 +741,9 @@ class DirectorService:
         storyboard from the user prompt so later stages can still produce a video.
         """
         system_prompt = _build_storyboard_system_prompt(
-            nano_banana_mode, target_duration_seconds
+            nano_banana_mode,
+            target_duration_seconds,
+            include_audio=include_audio,
         )
         candidate_models: list[str] = []
         for candidate in (STORYBOARD_MODEL, STORYBOARD_FALLBACK_MODEL):
@@ -709,6 +769,7 @@ class DirectorService:
                     raw_storyboard,
                     prompt,
                     target_duration_seconds=target_duration_seconds,
+                    include_audio=include_audio,
                 )
             except Exception as exc:
                 logger.error(
@@ -726,7 +787,9 @@ class DirectorService:
             attempts,
         )
         return self._build_fallback_storyboard(
-            prompt, target_duration_seconds=target_duration_seconds
+            prompt,
+            target_duration_seconds=target_duration_seconds,
+            include_audio=include_audio,
         )
 
     def _build_fallback_storyboard(
@@ -734,6 +797,7 @@ class DirectorService:
         prompt: str,
         *,
         target_duration_seconds: int,
+        include_audio: bool = True,
     ) -> dict[str, Any]:
         """Deterministic storyboard used when Gemini is unreachable or blocked."""
         target_duration_seconds = _normalize_target_duration_seconds(
@@ -759,7 +823,11 @@ class DirectorService:
             scenes.append(
                 {
                     "description": f"{opener}: {short_prompt}",
-                    "text": "",
+                    "text": (
+                        _scene_audio_text(f"{opener}: {short_prompt}", prompt, index)
+                        if include_audio
+                        else ""
+                    ),
                     "duration": per_scene_duration,
                     "render_type": render_type,
                 }
@@ -768,6 +836,7 @@ class DirectorService:
             {"mood": "cinematic", "scenes": scenes},
             prompt,
             target_duration_seconds=target_duration_seconds,
+            include_audio=include_audio,
         )
 
     def _normalize_storyboard(
@@ -776,6 +845,7 @@ class DirectorService:
         prompt: str,
         *,
         target_duration_seconds: int = 30,
+        include_audio: bool = True,
     ) -> dict[str, Any]:
         """Normalize model output to a resilient storyboard contract."""
         mood = str(
@@ -791,6 +861,10 @@ class DirectorService:
             text = str(item.get("text") or "").strip()
             if not description:
                 description = f"Cinematic scene inspired by: {prompt}"
+            if include_audio and not text:
+                text = _scene_audio_text(description, prompt, len(normalized_scenes))
+            if not include_audio:
+                text = ""
             normalized_scenes.append(
                 {
                     "description": description,
@@ -813,7 +887,13 @@ class DirectorService:
             normalized_scenes = [
                 {
                     "description": f"Cinematic establishing shot inspired by: {prompt}",
-                    "text": "",
+                    "text": _scene_audio_text(
+                        f"Cinematic establishing shot inspired by: {prompt}",
+                        prompt,
+                        0,
+                    )
+                    if include_audio
+                    else "",
                     "duration": 4,
                     "render_type": "veo",
                 }
@@ -869,7 +949,12 @@ class DirectorService:
         return image_url, image_bytes
 
     async def _process_scene(
-        self, index: int, scene: dict[str, Any], user_id: str
+        self,
+        index: int,
+        scene: dict[str, Any],
+        user_id: str,
+        *,
+        include_audio: bool = True,
     ) -> dict[str, Any] | None:
         """Generate assets for a single scene with Veo-first animation and optional image fallback."""
         description = str(scene.get("description") or "").strip()
@@ -893,7 +978,11 @@ class DirectorService:
                     voiceover_url,
                     voiceover_bytes,
                     voiceover_mime_type,
-                ) = await self._generate_voiceover_asset_for_scene(user_id, text)
+                ) = (
+                    await self._generate_voiceover_asset_for_scene(user_id, text)
+                    if include_audio
+                    else (None, None, None)
+                )
                 return {
                     "index": index,
                     "text": text,
@@ -915,6 +1004,7 @@ class DirectorService:
                 duration_seconds=duration,
                 aspect_ratio="16:9",
                 number_of_videos=1,
+                include_audio=include_audio,
             )
 
             if result.get("success"):
@@ -937,7 +1027,11 @@ class DirectorService:
                         voiceover_url,
                         voiceover_bytes,
                         voiceover_mime_type,
-                    ) = await self._generate_voiceover_asset_for_scene(user_id, text)
+                    ) = (
+                        await self._generate_voiceover_asset_for_scene(user_id, text)
+                        if include_audio
+                        else (None, None, None)
+                    )
                     return {
                         "index": index,
                         "text": text,
@@ -958,7 +1052,11 @@ class DirectorService:
                         voiceover_url,
                         voiceover_bytes,
                         voiceover_mime_type,
-                    ) = await self._generate_voiceover_asset_for_scene(user_id, text)
+                    ) = (
+                        await self._generate_voiceover_asset_for_scene(user_id, text)
+                        if include_audio
+                        else (None, None, None)
+                    )
                     return {
                         "index": index,
                         "text": text,
@@ -995,7 +1093,11 @@ class DirectorService:
                 voiceover_url,
                 voiceover_bytes,
                 voiceover_mime_type,
-            ) = await self._generate_voiceover_asset_for_scene(user_id, text)
+            ) = (
+                await self._generate_voiceover_asset_for_scene(user_id, text)
+                if include_audio
+                else (None, None, None)
+            )
             return {
                 "index": index,
                 "text": text,

@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
 from datetime import datetime, timezone
+from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from app.app_utils.auth import verify_scheduler
 from app.services.sse_connection_limits import (
     get_sse_connection_limit,
     get_total_active_sse_count,
@@ -395,3 +398,145 @@ async def get_video_readiness():
         latency_ms=0,
         details=report.get("details", {}),
     )
+
+
+def _media_smoke_payload(
+    *,
+    status: str,
+    service: str,
+    started_at: float,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    return _health_response(
+        status=status,
+        service=service,
+        latency_ms=int((time.monotonic() - started_at) * 1000),
+        details=details,
+    )
+
+
+@router.post("/health/smoke/image")
+async def post_image_smoke(_auth: bool = Depends(verify_scheduler)):
+    """Run a protected, real Vertex image-generation smoke test."""
+    started_at = time.monotonic()
+    prompt = os.getenv(
+        "MEDIA_SMOKE_IMAGE_PROMPT",
+        "A simple flat-color square icon with the letters PK, plain white background.",
+    )
+    project = os.getenv("GOOGLE_CLOUD_PROJECT")
+    location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    try:
+        from app.services.vertex_image_service import (
+            VERTEX_IMAGE_MODEL_PRIMARY,
+            generate_image,
+        )
+
+        result = await asyncio.to_thread(
+            generate_image,
+            prompt,
+            aspect_ratio="1:1",
+            number_of_images=1,
+        )
+        image_bytes_base64 = result.get("image_bytes_base64")
+        success = bool(result.get("success"))
+        details = {
+            "provider": "vertex-ai",
+            "project": project,
+            "location": location,
+            "requested_model": VERTEX_IMAGE_MODEL_PRIMARY,
+            "model_used": result.get("model_used"),
+            "mime_type": result.get("mime_type"),
+            "bytes_base64_length": (
+                len(image_bytes_base64)
+                if isinstance(image_bytes_base64, str)
+                else 0
+            ),
+            "error": result.get("error"),
+        }
+        if success:
+            logger.info("image_smoke_success details=%s", details)
+        else:
+            logger.error("image_smoke_failed details=%s", details)
+        return _media_smoke_payload(
+            status="ok" if success else "down",
+            service="image-smoke",
+            started_at=started_at,
+            details=details,
+        )
+    except Exception as exc:
+        details = {
+            "provider": "vertex-ai",
+            "project": project,
+            "location": location,
+            "error": str(exc),
+            "error_type": exc.__class__.__name__,
+        }
+        logger.exception("image_smoke_exception details=%s", details)
+        return _media_smoke_payload(
+            status="down",
+            service="image-smoke",
+            started_at=started_at,
+            details=details,
+        )
+
+
+@router.post("/health/smoke/video")
+async def post_video_smoke(_auth: bool = Depends(verify_scheduler)):
+    """Run a protected, real Vertex Veo smoke test."""
+    started_at = time.monotonic()
+    prompt = os.getenv(
+        "MEDIA_SMOKE_VIDEO_PROMPT",
+        "A four second product-style clip of a clean PK logo card on a desk, steady camera.",
+    )
+    project = os.getenv("GOOGLE_CLOUD_PROJECT")
+    location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    try:
+        from app.services.vertex_video_service import (
+            VERTEX_VIDEO_MODEL_PRIMARY,
+            generate_video,
+        )
+
+        result = await asyncio.to_thread(
+            generate_video,
+            prompt,
+            duration_seconds=4,
+            aspect_ratio="16:9",
+            number_of_videos=1,
+        )
+        video_bytes = result.get("video_bytes")
+        success = bool(result.get("success"))
+        details = {
+            "provider": "vertex-ai",
+            "project": project,
+            "location": location,
+            "requested_model": VERTEX_VIDEO_MODEL_PRIMARY,
+            "model_used": result.get("model_used"),
+            "video_url_present": bool(result.get("video_url")),
+            "bytes_length": len(video_bytes) if isinstance(video_bytes, bytes) else 0,
+            "error": result.get("error"),
+        }
+        if success:
+            logger.info("video_smoke_success details=%s", details)
+        else:
+            logger.error("video_smoke_failed details=%s", details)
+        return _media_smoke_payload(
+            status="ok" if success else "down",
+            service="video-smoke",
+            started_at=started_at,
+            details=details,
+        )
+    except Exception as exc:
+        details = {
+            "provider": "vertex-ai",
+            "project": project,
+            "location": location,
+            "error": str(exc),
+            "error_type": exc.__class__.__name__,
+        }
+        logger.exception("video_smoke_exception details=%s", details)
+        return _media_smoke_payload(
+            status="down",
+            service="video-smoke",
+            started_at=started_at,
+            details=details,
+        )

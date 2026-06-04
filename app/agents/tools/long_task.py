@@ -29,7 +29,9 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-from typing import Any, Callable, TypeVar
+import os
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from app.services.long_job import submit_long_job
 from app.services.request_context import (
@@ -111,7 +113,7 @@ async def run_as_long_job(
             user_id=user_id,
             session_id=session_id,
         )
-    except Exception as exc:  # noqa: BLE001 — surfaced back to the agent
+    except Exception as exc:
         logger.error("Failed to submit long job (kind=%s): %s", kind, exc)
         return {
             "success": False,
@@ -142,7 +144,7 @@ async def run_as_long_job(
                     }
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — best-effort
+        except Exception as exc:
             logger.warning(
                 "Could not enqueue long_task_started event for job %s: %s",
                 job_id,
@@ -177,12 +179,14 @@ def _has_active_agent_context() -> bool:
     """Return True iff a request-scoped progress queue is set.
 
     The queue is installed by the SSE event_generator at the start of every
-    ``/a2a/app/run_sse`` request (Wave 2 LONGTASK-08). When the queue is
-    set we know we are inside an agent invocation and can safely promote
-    a slow tool call to a background job. When it is unset the call is
-    coming from a unit test, a direct script, or the WorkflowWorker
-    re-executing a promoted job — all of which must run synchronously.
+    ``/a2a/app/run_sse`` request (Wave 2 LONGTASK-08). Auto-promotion also
+    requires ``LONG_TASK_AUTO_PROMOTE=true`` so production does not enqueue
+    work unless a real worker/scheduler path has been deployed. When either
+    guard is unset, the tool runs inline.
     """
+    enabled = os.getenv("LONG_TASK_AUTO_PROMOTE", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return False
     return get_current_progress_queue() is not None
 
 
@@ -263,7 +267,7 @@ def long_task(
                     user_id=user_id,
                     session_id=session_id,
                 )
-            except Exception as exc:  # noqa: BLE001 — surface to the agent
+            except Exception as exc:
                 logger.error(
                     "long_task auto-promote failed for %s: %s",
                     func.__name__,
@@ -288,7 +292,7 @@ def long_task(
                             }
                         )
                     )
-                except Exception as exc:  # noqa: BLE001 — best-effort
+                except Exception as exc:
                     logger.warning(
                         "Could not enqueue long_task_started for %s: %s",
                         job_id,

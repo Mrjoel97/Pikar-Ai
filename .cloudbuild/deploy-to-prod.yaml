@@ -68,6 +68,24 @@ steps:
       - $_PROD_PROJECT_ID
     waitFor: ["push-image"]
 
+  # Keep the scheduled background worker on the same application image.
+  # Terraform owns the job's env/secrets/schedule; CI only advances the image.
+  - name: "gcr.io/cloud-builders/gcloud-slim"
+    id: update-worker-image
+    entrypoint: /bin/bash
+    args:
+      - "-c"
+      - |
+        if gcloud run jobs describe pikar-ai-worker --region "$_REGION" --project "$_PROD_PROJECT_ID" >/dev/null 2>&1; then
+          gcloud run jobs update pikar-ai-worker \
+            --image "$_REGION-docker.pkg.dev/$_PROD_PROJECT_ID/$_ARTIFACT_REGISTRY_REPO_NAME/$_CONTAINER_NAME:$SHORT_SHA" \
+            --region "$_REGION" \
+            --project "$_PROD_PROJECT_ID"
+        else
+          echo "pikar-ai-worker Cloud Run Job does not exist yet. Apply deployment/terraform before relying on long-task workers."
+        fi
+    waitFor: ["push-image"]
+
 substitutions:
   _PROD_PROJECT_ID: ''  # Must be provided by trigger configuration
   _REGION: us-central1

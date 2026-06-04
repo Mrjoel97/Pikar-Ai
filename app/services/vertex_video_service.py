@@ -46,6 +46,7 @@ def generate_video(
     aspect_ratio: str = "16:9",
     number_of_videos: int = 1,
     image_bytes: bytes | None = None,
+    include_audio: bool = True,
 ) -> dict[str, Any]:
     """Generate video using Vertex Veo models."""
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
@@ -76,6 +77,7 @@ def generate_video(
                 aspect_ratio=aspect_ratio,
                 number_of_videos=number_of_videos,
                 image_bytes=image_bytes,
+                include_audio=include_audio,
             )
             if result.get("success"):
                 return result
@@ -160,6 +162,7 @@ def _generate_video_with_sdk(
     aspect_ratio: str,
     number_of_videos: int,
     image_bytes: bytes | None = None,
+    include_audio: bool = True,
 ) -> dict[str, Any]:
     """Call Vertex Veo using google-genai SDK."""
     try:
@@ -180,6 +183,7 @@ def _generate_video_with_sdk(
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
             number_of_videos=min(max(1, number_of_videos), 4),
+            generate_audio=include_audio,
         )
 
         request_kwargs: dict[str, Any] = {

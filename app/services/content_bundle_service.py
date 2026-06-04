@@ -156,6 +156,8 @@ class ContentBundleService:
                         "file_url": file_url,
                         "thumbnail_url": thumbnail_url,
                         "editable_url": editable_url,
+                        "bucket_id": metadata.get("bucket_id"),
+                        "file_path": metadata.get("file_path"),
                         "platform_profile": platform_profile,
                     }
                 ),

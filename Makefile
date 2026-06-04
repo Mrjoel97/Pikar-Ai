@@ -110,10 +110,19 @@ deploy:
 		--labels "created-by=adk" \
 		--update-build-env-vars "AGENT_VERSION=$(shell awk -F'"' '/^version = / {print $$2}' pyproject.toml || echo '0.0.0')" \
 		--update-env-vars \
-		"^;^APP_URL=https://pikar-ai-$$PROJECT_NUMBER.us-central1.run.app;ALLOWED_ORIGINS=https://pikar-ai.com,https://www.pikar-ai.com,https://admin.pikar-ai.com,https://pikar-ai.vercel.app,https://pikar-ai-joelferuzi-gmailcoms-projects.vercel.app,https://pikar-ai-git-main-joelferuzi-gmailcoms-projects.vercel.app" \
+		"^;^APP_URL=https://pikar-ai-$$PROJECT_NUMBER.us-central1.run.app;REQUEST_TIMEOUT_SECONDS=700;ALLOWED_ORIGINS=https://pikar-ai.com,https://www.pikar-ai.com,https://admin.pikar-ai.com,https://pikar-ai.vercel.app,https://pikar-ai-joelferuzi-gmailcoms-projects.vercel.app,https://pikar-ai-git-main-joelferuzi-gmailcoms-projects.vercel.app" \
 		$(if $(IAP),--iap,--allow-unauthenticated) \
 		$(if $(PORT),--port=$(PORT),) \
 		&& gcloud run services update-traffic pikar-ai --region=us-central1 --project=$$PROJECT_ID --to-latest --quiet
+
+deploy-worker:
+	PROJECT_ID=$$(gcloud config get-value project) && \
+	IMAGE=$$(gcloud run services describe pikar-ai --region=us-central1 --project=$$PROJECT_ID --format="value(spec.template.spec.containers[0].image)") && \
+	gcloud run jobs update pikar-ai-worker \
+		--image "$$IMAGE" \
+		--region "us-central1" \
+		--project $$PROJECT_ID \
+		--update-env-vars "WORKER_RUN_SECONDS=55,WORKER_POLL_INTERVAL_SECONDS=5,REQUEST_TIMEOUT_SECONDS=700"
 
 # Alias for 'make deploy' for backward compatibility
 backend: deploy

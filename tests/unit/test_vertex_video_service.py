@@ -64,6 +64,7 @@ def test_generate_video_with_sdk_uses_image_argument_for_image_to_video():
     assert result["success"] is True
     kwargs = client.models.generate_videos.call_args.kwargs
     assert kwargs["prompt"] == "benchmark prompt"
+    assert kwargs["config"].generate_audio is True
     assert kwargs["image"] is sentinel.image_payload
     image_mock.assert_called_once_with(image_bytes=png_bytes, mime_type="image/png")
 
@@ -123,3 +124,27 @@ def test_generate_video_with_sdk_fails_when_gcs_uri_download_fails():
     assert result["video_bytes"] is None
     assert result["video_url"] is None
     assert result["error"] == "permission denied"
+
+
+def test_generate_video_with_sdk_can_disable_audio():
+    client = MagicMock()
+    client.models.generate_videos.return_value = _video_operation(
+        uri="https://example.com/video.mp4"
+    )
+
+    module_patch, attr_patch, _fake_types = _install_fake_google_genai(client=client)
+    with module_patch, attr_patch:
+        result = vertex_video_service._generate_video_with_sdk(
+            project="pikar-ai-project",
+            location="us-central1",
+            model_id="veo-test",
+            prompt="Silent launch video",
+            duration_seconds=4,
+            aspect_ratio="16:9",
+            number_of_videos=1,
+            include_audio=False,
+        )
+
+    assert result["success"] is True
+    kwargs = client.models.generate_videos.call_args.kwargs
+    assert kwargs["config"].generate_audio is False

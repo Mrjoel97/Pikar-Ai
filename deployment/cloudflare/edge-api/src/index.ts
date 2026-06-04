@@ -402,6 +402,7 @@ const DEFAULT_AGENT_PREFIXES = [
   "/workflows",
   "/workflow-triggers",
   "/ws",
+  "/workspace",
   "/vault",
   "/self-improvement",
   "/compliance",
@@ -629,6 +630,12 @@ async function proxyRequest(
   rateLimit: RateLimitDecision | null = null,
 ): Promise<Response> {
   const target = proxyUrl(request, env);
+  const isWebSocketUpgrade = request.headers.get("Upgrade")?.toLowerCase() === "websocket";
+
+  if (isWebSocketUpgrade) {
+    return fetch(new Request(target.toString(), request));
+  }
+
   const headers = new Headers(request.headers);
   const publicOrigin = normalizeOrigin(env.PUBLIC_BACKEND_ORIGIN, "PUBLIC_BACKEND_ORIGIN");
 

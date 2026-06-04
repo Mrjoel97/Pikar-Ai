@@ -12,9 +12,12 @@ Background process that polls for active workflow steps and executes them.
 import asyncio
 import inspect
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
+
+from supabase._async.client import AsyncClient
 
 from app.services.knowledge_service import process_video_transcript
 from app.services.supabase_client import get_async_client, get_service_client
@@ -22,7 +25,6 @@ from app.workflows.contract_defaults import normalize_template_for_execution
 from app.workflows.engine import get_workflow_engine
 from app.workflows.step_executor import StepExecutor
 from supabase import Client
-from supabase._async.client import AsyncClient
 
 # Configure Logging
 logging.basicConfig(
@@ -74,10 +76,12 @@ class WorkflowWorker:
             self._async_client = await get_async_client()
         return self._async_client
 
-    async def start(self, interval_seconds: int = 5):
+    async def start(self, interval_seconds: int = 5, run_seconds: int | None = None):
         """Start the polling loop with maintenance and schedule ticks."""
         self.running = True
         logger.info("Workflow Worker %s started. Polling for tasks...", self.worker_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + run_seconds if run_seconds and run_seconds > 0 else None
 
         while self.running:
             try:
@@ -90,6 +94,14 @@ class WorkflowWorker:
                 await self.run_maintenance_if_due()
             except Exception as e:
                 logger.error("Error in worker loop: %s", e, exc_info=True)
+
+            if deadline is not None and loop.time() >= deadline:
+                logger.info(
+                    "Workflow Worker %s finished scheduled run window (%ss).",
+                    self.worker_id,
+                    run_seconds,
+                )
+                break
 
             await asyncio.sleep(interval_seconds)
 
@@ -483,10 +495,11 @@ class WorkflowWorker:
                         step=step,
                     )
                 )
+                step_id = step.get("id")
                 _task.add_done_callback(
-                    lambda t: logger.error(
+                    lambda t, step_id=step_id: logger.error(
                         "step-paused SSE publish failed for step %s: %s",
-                        step.get("id"),
+                        step_id,
                         t.exception(),
                         exc_info=t.exception(),
                     ) if t.exception() else None
@@ -548,5 +561,7 @@ class WorkflowWorker:
 
 
 if __name__ == "__main__":
+    run_seconds = int(os.getenv("WORKER_RUN_SECONDS", "0") or "0") or None
+    interval_seconds = int(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "5") or "5")
     worker = WorkflowWorker()
-    asyncio.run(worker.start())
+    asyncio.run(worker.start(interval_seconds=interval_seconds, run_seconds=run_seconds))

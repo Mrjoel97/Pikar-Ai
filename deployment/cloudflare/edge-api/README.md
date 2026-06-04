@@ -10,6 +10,14 @@ This Worker is the public API entrypoint for the split deployment model:
 
 Use this Worker to expose `https://api.pikar-ai.com` without sending browsers directly to Google.
 
+## WebSocket Upgrades
+
+Live brainstorm voice sessions use Gemini Live through the backend WebSocket path
+`/ws/voice/{session_id}`. The Worker should proxy these WebSocket upgrade
+requests directly to `AGENT_BACKEND_ORIGIN` and bypass JSON body rewriting,
+standard rate-limit response shaping, and response buffering. The FastAPI route
+authenticates the first WebSocket message and owns the Live API session lifecycle.
+
 ## Environment Variables
 
 ### Required

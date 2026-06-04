@@ -14,10 +14,11 @@ import asyncio
 import logging
 import os
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 from app.mcp.security.audit_logger import log_mcp_call
 from app.mcp.security.external_call_guard import protect_text_payload
+from app.services.video_audio_policy import resolve_include_audio
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class CanvaMCPTool:
     """Canva MCP Tool for media creation and management."""
 
     # Supported design types
-    DESIGN_TYPES = {
+    DESIGN_TYPES: ClassVar[dict[str, dict[str, int]]] = {
         "instagram_post": {"width": 1080, "height": 1080},
         "instagram_story": {"width": 1080, "height": 1920},
         "facebook_post": {"width": 1200, "height": 630},
@@ -47,7 +48,7 @@ class CanvaMCPTool:
     }
 
     # Style presets for nano-banana
-    NANO_BANANA_STYLES = {
+    NANO_BANANA_STYLES: ClassVar[dict[str, str]] = {
         "vibrant": "vibrant colors, high saturation, energetic, modern",
         "minimal": "minimalist, clean lines, subtle colors, elegant",
         "tech": "futuristic, digital, glowing elements, dark background",
@@ -293,6 +294,7 @@ async def create_video(
     duration: int = 30,
     style: str = "modern",
     user_id: str | None = None,
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Create a programmatic (scene-based) video using Remotion.
 
@@ -312,6 +314,10 @@ async def create_video(
     user_id = user_id or get_current_user_id()
     if not user_id:
         return {"success": False, "error": "User ID required"}
+    audio_prompt = " ".join(
+        [title, *[str(scene.get("text") or scene.get("description") or "") for scene in scenes]]
+    )
+    include_audio = resolve_include_audio(audio_prompt, include_audio)
 
     # Construct props for Remotion
     fps = 30
@@ -322,13 +328,18 @@ async def create_video(
     for s in scenes:
         scene_duration = int(s.get("duration", 4))
         text = str(s.get("text", "") or s.get("description", ""))
+        has_voiceover = bool(s.get("voiceover_url"))
         remotion_scenes.append(
             {
                 "text": text,
                 "duration": scene_duration,
                 "imageUrl": s.get("image_url", ""),
                 "videoUrl": s.get("video_url", ""),
-                "voiceoverUrl": s.get("voiceover_url", ""),
+                "voiceoverUrl": s.get("voiceover_url", "") if include_audio else "",
+                "includeAudio": include_audio,
+                "useSourceAudio": bool(
+                    include_audio and s.get("video_url") and not has_voiceover
+                ),
                 "captions": [
                     {
                         "text": text,
@@ -348,7 +359,12 @@ async def create_video(
         "durationInFrames": duration_frames,
         "bgMusicVolume": 0.35,
         "voiceoverVolume": 1.0,
+        "includeAudio": include_audio,
     }
+    if include_audio:
+        from app.services import audio_music_service
+
+        props["bgMusicUrl"] = audio_music_service.select_background_music_url(style)
 
     try:
         mp4_bytes, asset_id = await asyncio.to_thread(
@@ -371,11 +387,13 @@ async def create_video(
                 title,
                 duration,
                 "programmatic-remotion",
+                include_audio=include_audio,
             )
 
         return {
             "success": True,
             "video_bytes": mp4_bytes,
+            "include_audio": include_audio,
             "user_message": "Programmatic video generated successfully.",
         }
     except Exception as e:
@@ -388,6 +406,7 @@ async def create_video_with_veo(
     duration_seconds: int = 6,
     aspect_ratio: str = "16:9",
     user_id: str | None = None,
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Create a video from a text prompt; uses VEO 3 or server-side Remotion by duration.
 
@@ -405,6 +424,7 @@ async def create_video_with_veo(
         duration_seconds=duration_seconds,
         aspect_ratio=aspect_ratio,
         user_id=user_id,
+        include_audio=include_audio,
     )
 
 
@@ -566,6 +586,7 @@ async def execute_content_pipeline(
     user_id: str | None = None,
     auto_publish: bool = False,
     nano_banana_mode: str = "always",
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Execute the full Content Creation Pipeline.
 
@@ -589,6 +610,7 @@ async def execute_content_pipeline(
     user_id = user_id or get_current_user_id()
     if not user_id:
         return {"success": False, "error": "User ID required"}
+    include_audio = resolve_include_audio(prompt, include_audio)
 
     platform = _normalize_social_platform(platform)
     director = DirectorService()
@@ -611,6 +633,7 @@ async def execute_content_pipeline(
             progress_callback=_progress_callback,
             return_metadata=True,
             nano_banana_mode=nano_banana_mode,
+            include_audio=include_audio,
         )
     except Exception as exc:
         logger.error(
@@ -683,6 +706,7 @@ async def execute_content_pipeline(
         asset_id = pipeline_result.get("asset_id")
         storyboard_captions = pipeline_result.get("storyboard_captions") or []
         generated_scenes = pipeline_result.get("scenes") or []
+        include_audio = bool(pipeline_result.get("include_audio", include_audio))
     else:
         video_url = pipeline_result
         asset_id = None
@@ -745,6 +769,7 @@ async def execute_content_pipeline(
                     "storyboard_captions": storyboard_captions,
                     "nano_banana_mode": nano_banana_mode,
                     "scene_count": len(generated_scenes),
+                    "include_audio": include_audio,
                 },
             )
         except Exception as exc:
@@ -755,11 +780,13 @@ async def execute_content_pipeline(
         "video_url": video_url,
         "asset_id": asset_id,
         "storyboard_captions": storyboard_captions,
+        "include_audio": include_audio,
         "content_contract": content_contract,
         "pipeline": {
             "scene_count": len(generated_scenes),
             "storyboard_captions": storyboard_captions,
             "nano_banana_mode": nano_banana_mode,
+            "include_audio": include_audio,
         },
         "social_post": post_result,
         "publish_result": publish_result,

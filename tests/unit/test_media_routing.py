@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.agents.tools import media
+from app.services.video_audio_policy import resolve_include_audio
 
 
 def test_should_use_director_pipeline_by_duration():
@@ -14,13 +15,40 @@ def test_should_not_use_director_pipeline_for_short_clips_even_if_prompt_is_narr
     assert not media._should_use_director_pipeline("make a cinematic story with transitions", media.VEO_MAX_DURATION_SECONDS)
 
 
+def test_video_audio_policy_defaults_on_and_respects_silent_prompt():
+    assert resolve_include_audio("make a launch video") is True
+    assert resolve_include_audio("make a muted product teaser") is False
+    assert resolve_include_audio("make a video with no sound") is False
+
+
 @pytest.mark.asyncio
 async def test_generate_video_routes_to_director_for_long_requests():
     with patch("app.agents.tools.media.create_pro_video", AsyncMock(return_value={"type": "video"})) as pro_mock:
         result = await media.generate_video(prompt="long-form brand story", duration_seconds=60, user_id="u1")
 
     assert result["type"] == "video"
-    pro_mock.assert_awaited_once_with(prompt="long-form brand story", user_id="u1", duration_seconds=60)
+    pro_mock.assert_awaited_once_with(
+        prompt="long-form brand story",
+        user_id="u1",
+        duration_seconds=60,
+        include_audio=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_video_routes_silent_prompt_to_director_without_audio():
+    with patch(
+        "app.agents.tools.media.create_pro_video",
+        AsyncMock(return_value={"type": "video"}),
+    ) as pro_mock:
+        result = await media.generate_video(
+            prompt="long-form brand story with no sound",
+            duration_seconds=60,
+            user_id="u1",
+        )
+
+    assert result["type"] == "video"
+    assert pro_mock.await_args.kwargs["include_audio"] is False
 
 
 @pytest.mark.asyncio
@@ -63,6 +91,7 @@ async def test_create_pro_video_returns_progress_and_contract_in_widget():
     director_mock.assert_awaited_once()
     assert director_mock.await_args.kwargs["return_metadata"] is True
     assert director_mock.await_args.kwargs["target_duration_seconds"] == 90
+    assert director_mock.await_args.kwargs["include_audio"] is True
 
 
 @pytest.mark.asyncio
@@ -73,6 +102,7 @@ async def test_create_pro_video_returns_specific_render_failure_message():
         progress_callback=None,
         return_metadata: bool = False,
         target_duration_seconds: int = 30,
+        include_audio: bool = True,
     ):
         await progress_callback("planning_started", {"target_duration_seconds": target_duration_seconds})
         await progress_callback("planning_done", {"scene_count": 4})

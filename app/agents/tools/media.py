@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.agents.tools.long_task import long_task
+from app.services.video_audio_policy import resolve_include_audio
 
 logger = logging.getLogger(__name__)
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
@@ -59,7 +60,7 @@ def _get_supabase_client():
         from app.services.supabase import get_service_client
 
         return get_service_client()
-    except (ImportError, ConnectionError):
+    except (ImportError, ConnectionError, ValueError):
         return None
 
 
@@ -224,6 +225,7 @@ async def _build_video_storage_fallback(
     video_bytes: bytes,
     fallback_video_url: str | None,
     model_used: str | None,
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Return the best available video result when storage or signing fails."""
     title = (prompt[:80] + "…") if len(prompt) > 80 else prompt
@@ -256,6 +258,7 @@ async def _build_video_storage_fallback(
                             "prompt": prompt,
                             "source": f"{source}-storage-fallback",
                             "duration": duration,
+                            "include_audio": include_audio,
                             "model_used": model_used,
                             "storage_failed": True,
                             "session_id": request_scope.get("session_id"),
@@ -293,6 +296,7 @@ async def _build_video_storage_fallback(
                             "prompt": prompt,
                             "source": f"{source}-storage-fallback",
                             "duration": duration,
+                            "include_audio": include_audio,
                             "storage_failed": True,
                             "session_id": request_scope.get("session_id"),
                             "workflow_execution_id": request_scope.get(
@@ -315,6 +319,7 @@ async def _build_video_storage_fallback(
                 "title": title,
                 "asset_id": asset_id,
                 "caption": prompt,
+                "include_audio": include_audio,
             },
             "dismissible": True,
             "expandable": True,
@@ -330,6 +335,7 @@ async def _build_video_storage_fallback(
             metadata={
                 "source": source,
                 "duration": duration,
+                "include_audio": include_audio,
                 "model_used": model_used,
                 "storage_failed": True,
             },
@@ -341,6 +347,7 @@ async def _build_video_storage_fallback(
         "video_bytes": video_bytes,
         "video_url": None,
         "model_used": model_used or source,
+        "include_audio": include_audio,
         "user_message": "Video generated, but storage failed. Returning the unstored result.",
     }
 
@@ -544,6 +551,8 @@ async def generate_image(
             "imageUrl": image_url,
             "prompt": prompt,
             "asset_id": asset_id,
+            "bucket_id": bucket_id,
+            "file_path": file_path,
             "caption": title,
         },
         "dismissible": True,
@@ -557,7 +566,12 @@ async def generate_image(
         prompt=prompt,
         file_url=file_url or image_url,
         source="generate_image",
-        metadata={"style": style, "model_used": result.get("model_used")},
+        metadata={
+            "style": style,
+            "model_used": result.get("model_used"),
+            "bucket_id": bucket_id,
+            "file_path": file_path,
+        },
     )
     return _finalize_widget(user_id=user_id, widget=widget, contract=contract)
 
@@ -568,6 +582,7 @@ async def generate_video(
     aspect_ratio: str = "16:9",
     user_id: str | None = None,
     art_direction_id: str = "",
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Generate video using Vertex Veo or the multi-scene Director pipeline.
 
@@ -589,6 +604,7 @@ async def generate_video(
 
     user_id = user_id or get_current_user_id()
     request_scope = _get_request_scope()
+    include_audio = resolve_include_audio(prompt, include_audio)
 
     # Apply art direction contract if provided
     if art_direction_id and user_id:
@@ -629,6 +645,7 @@ async def generate_video(
             prompt=prompt,
             user_id=user_id,
             duration_seconds=duration_normalized,
+            include_audio=include_audio,
         )
 
     supabase = _get_supabase_client()
@@ -641,7 +658,12 @@ async def generate_video(
     if use_remotion_only:
         # Server-side Remotion Render
         video_bytes, asset_id = await asyncio.to_thread(
-            render_scenes_to_mp4, prompt, duration_normalized, user_id or ""
+            render_scenes_to_mp4,
+            prompt,
+            duration_normalized,
+            user_id or "",
+            None,
+            include_audio,
         )
 
         if video_bytes and asset_id and user_id and supabase:
@@ -653,6 +675,7 @@ async def generate_video(
                 prompt,
                 duration_normalized,
                 "server-side remotion",
+                include_audio=include_audio,
             )
 
         # Remotion render failed
@@ -678,6 +701,7 @@ async def generate_video(
         duration_seconds=veo_duration,
         aspect_ratio=aspect_ratio,
         number_of_videos=1,
+        include_audio=include_audio,
     )
 
     if not result.get("success"):
@@ -707,6 +731,7 @@ async def generate_video(
                     duration_seconds=duration_normalized,
                     user_id=user_id or "system_fallback",
                     image_url=image_url,
+                    include_audio=include_audio,
                 )
 
             # Run in executor to avoid blocking event loop
@@ -723,6 +748,7 @@ async def generate_video(
                         prompt,
                         duration_normalized,
                         "fallback-remotion",
+                        include_audio=include_audio,
                     )
 
                 # Otherwise return raw success
@@ -731,6 +757,7 @@ async def generate_video(
                     "video_bytes": mp4_bytes,
                     "video_url": None,
                     "model_used": "remotion-render",
+                    "include_audio": include_audio,
                     "user_message": "Video generated using Remotion (Veo unavailable).",
                 }
             else:
@@ -785,6 +812,7 @@ async def generate_video(
             "vertex veo",
             fallback_video_url=video_url,
             model_used=result.get("model_used"),
+            include_audio=include_audio,
         )
 
     if video_bytes:
@@ -793,6 +821,7 @@ async def generate_video(
             "video_bytes": video_bytes,
             "video_url": None,
             "model_used": result.get("model_used"),
+            "include_audio": include_audio,
             "user_message": "Video generated using Vertex Veo.",
         }
 
@@ -816,6 +845,7 @@ async def generate_video(
                             "prompt": prompt,
                             "source": "vertex veo url",
                             "duration": duration_normalized,
+                            "include_audio": include_audio,
                             "session_id": request_scope.get("session_id"),
                             "workflow_execution_id": request_scope.get(
                                 "workflow_execution_id"
@@ -835,7 +865,10 @@ async def generate_video(
                 "videoUrl": video_url,
                 "title": prompt[:50],
                 "asset_id": asset_id,
+                "bucket_id": "external-generated",
+                "file_path": f"external/{asset_id}.mp4",
                 "caption": prompt,
+                "include_audio": include_audio,
             },
             "dismissible": True,
             "expandable": True,
@@ -848,7 +881,11 @@ async def generate_video(
             prompt=prompt,
             file_url=video_url,
             source="generate_video_url_fallback",
-            metadata={"source": "vertex veo url", "duration": duration_normalized},
+            metadata={
+                "source": "vertex veo url",
+                "duration": duration_normalized,
+                "include_audio": include_audio,
+            },
         )
         return _finalize_widget(user_id=user_id, widget=widget, contract=contract)
 
@@ -870,6 +907,7 @@ async def _save_and_return_video_widget(
     source,
     fallback_video_url: str | None = None,
     model_used: str | None = None,
+    include_audio: bool | None = None,
 ):
     """Helper to save video to storage/db and return widget."""
     request_scope = _get_request_scope()
@@ -908,6 +946,7 @@ async def _save_and_return_video_widget(
                     video_bytes=video_bytes,
                     fallback_video_url=fallback_video_url,
                     model_used=model_used,
+                    include_audio=include_audio,
                 )
 
     if upload_success:
@@ -931,6 +970,7 @@ async def _save_and_return_video_widget(
                 video_bytes=video_bytes,
                 fallback_video_url=fallback_video_url,
                 model_used=model_used,
+                include_audio=include_audio,
             )
 
     if file_url:
@@ -954,6 +994,7 @@ async def _save_and_return_video_widget(
                         "prompt": prompt,
                         "source": source,
                         "duration": duration,
+                        "include_audio": include_audio,
                         "session_id": request_scope.get("session_id"),
                         "workflow_execution_id": request_scope.get(
                             "workflow_execution_id"
@@ -984,6 +1025,7 @@ async def _save_and_return_video_widget(
                         "prompt": prompt,
                         "source": source,
                         "duration": duration,
+                        "include_audio": include_audio,
                         "session_id": request_scope.get("session_id"),
                         "workflow_execution_id": request_scope.get(
                             "workflow_execution_id"
@@ -1002,7 +1044,10 @@ async def _save_and_return_video_widget(
                 "videoUrl": file_url,
                 "title": title,
                 "asset_id": asset_id,
+                "bucket_id": bucket_id,
+                "file_path": storage_path,
                 "caption": prompt,
+                "include_audio": include_audio,
             },
             "dismissible": True,
             "expandable": True,
@@ -1015,7 +1060,13 @@ async def _save_and_return_video_widget(
             prompt=prompt,
             file_url=file_url,
             source=source,
-            metadata={"source": source, "duration": duration},
+            metadata={
+                "source": source,
+                "duration": duration,
+                "include_audio": include_audio,
+                "bucket_id": bucket_id,
+                "file_path": storage_path,
+            },
         )
         return _finalize_widget(user_id=user_id, widget=widget, contract=contract)
 
@@ -1028,6 +1079,7 @@ async def _save_and_return_video_widget(
         video_bytes=video_bytes,
         fallback_video_url=fallback_video_url,
         model_used=model_used,
+        include_audio=include_audio,
     )
 
 
@@ -1065,6 +1117,7 @@ async def create_pro_video(
     prompt: str,
     user_id: str | None = None,
     duration_seconds: int = 30,
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Create a high-quality, multi-scene video using AI Director (Veo 3 + Remotion).
 
@@ -1088,6 +1141,7 @@ async def create_pro_video(
     user_id = user_id or get_current_user_id()
     if not user_id:
         return {"success": False, "error": "User ID required"}
+    include_audio = resolve_include_audio(prompt, include_audio)
 
     target_duration_seconds = max(
         4, min(DIRECTOR_MAX_DURATION_SECONDS, int(duration_seconds or 30))
@@ -1171,6 +1225,7 @@ async def create_pro_video(
             progress_callback=_progress_callback,
             return_metadata=True,
             target_duration_seconds=target_duration_seconds,
+            include_audio=include_audio,
         )
 
         if not result_payload:
@@ -1230,6 +1285,13 @@ async def create_pro_video(
                 "source": "director_service",
                 "storyboard_captions": storyboard_captions or [],
                 "duration": target_duration_seconds,
+                "include_audio": include_audio,
+                "bucket_id": "generated-videos",
+                "file_path": (
+                    result_payload.get("storage_path")
+                    if isinstance(result_payload, dict)
+                    else None
+                ),
             },
         )
         widget = {
@@ -1240,7 +1302,14 @@ async def create_pro_video(
                 "title": prompt[:50],
                 "caption": "Generated with AI Director (Veo + Remotion)",
                 "asset_id": asset_id,
+                "bucket_id": "generated-videos",
+                "file_path": (
+                    result_payload.get("storage_path")
+                    if isinstance(result_payload, dict)
+                    else None
+                ),
                 "durationSeconds": target_duration_seconds,
+                "include_audio": include_audio,
                 "progress": progress_events,
                 "storyboard_captions": storyboard_captions or [],
             },
@@ -1317,6 +1386,7 @@ async def generate_videos(
     duration_seconds: int = 6,
     aspect_ratio: str = "16:9",
     user_id: str | None = None,
+    include_audio: bool | None = None,
 ) -> dict[str, Any]:
     """Generate multiple videos. Runs sequentially to avoid Veo rate limits.
 
@@ -1343,6 +1413,7 @@ async def generate_videos(
                 duration_seconds=duration_seconds,
                 aspect_ratio=aspect_ratio,
                 user_id=user_id,
+                include_audio=include_audio,
             )
             if isinstance(result, dict) and result.get("type") == "video":
                 widgets.append(result)
