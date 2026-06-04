@@ -80,8 +80,13 @@ from app.agents.tools.decision_journal import DECISION_JOURNAL_TOOLS
 # Import Deep Research tools for intelligent research behavior
 from app.agents.tools.deep_research import DEEP_RESEARCH_TOOLS
 
-# Import document generation tools (PDF reports, PowerPoint pitch decks)
+# Import document generation tools (PDF reports, PowerPoint pitch decks, XLSX workbooks)
 from app.agents.tools.document_gen import DOCUMENT_GEN_TOOLS
+from app.agents.tools.docs import DOCS_TOOLS
+from app.agents.tools.forms import FORMS_TOOLS
+from app.agents.tools.gmail import GMAIL_TOOLS
+from app.agents.tools.google_sheets import GOOGLE_SHEETS_TOOLS
+from app.agents.tools.calendar_tool import CALENDAR_TOOLS
 
 # Import long-running job handoff tool (LONGTASK-01)
 from app.agents.tools.long_task import LONG_TASK_TOOLS
@@ -106,6 +111,9 @@ from app.agents.tools.ui_widgets import UI_WIDGET_TOOLS
 
 # Import workflow tools
 from app.agents.tools.workflows import WORKFLOW_TOOLS
+
+# Import media generation tools used by the Executive's artifact creation playbook
+from app.mcp.tools.canva_media import CANVA_TOOLS
 
 # Import cross-agent semantic claim search tool (113-04)
 from app.agents.tools.intelligence_search import INTELLIGENCE_SEARCH_TOOLS
@@ -297,6 +305,12 @@ _EXECUTIVE_TOOLS = _sanitize(
             *CROSS_AGENT_SYNTHESIS_TOOLS,
             *DECISION_JOURNAL_TOOLS,
             *DOCUMENT_GEN_TOOLS,
+            *DOCS_TOOLS,
+            *GOOGLE_SHEETS_TOOLS,
+            *FORMS_TOOLS,
+            *GMAIL_TOOLS,
+            *CALENDAR_TOOLS,
+            *CANVA_TOOLS,
             *ONBOARDING_NUDGE_TOOLS,
             *LONG_TASK_TOOLS,
         ]
@@ -405,6 +419,8 @@ def _build_executive_agent(model, sub_agents=None, persona: str | None = None):
             logger.exception(
                 "Manifest-built Executive failed; falling back to legacy factory"
             )
+    if sub_agents is None:
+        sub_agents = _build_fallback_sub_agents(persona=persona)
     return _build_executive_agent_legacy(model, sub_agents=sub_agents, persona=persona)
 
 
@@ -448,6 +464,19 @@ def _build_fallback_sub_agents(persona: str | None = None):
     ]
 
 
+def _default_sub_agents_for_mode(persona: str | None = None):
+    """Return explicit sub-agents only when the manifest graph is disabled.
+
+    The manifest builder owns the full Executive sub-agent tree. Passing the
+    legacy ``SPECIALIZED_AGENTS`` list into a manifest-built Executive replaces
+    that complete graph with a partial singleton list, which removes specialists
+    such as ContentCreationAgent from live routing.
+    """
+    if _USE_MANIFESTS:
+        return None
+    return _build_fallback_sub_agents(persona=persona)
+
+
 def create_executive_agent(persona: str | None = None, model_override=None):
     """Create a fresh ExecutiveAgent for a single request (prevents context leaks).
 
@@ -458,11 +487,9 @@ def create_executive_agent(persona: str | None = None, model_override=None):
             LiteLlm built from the user's BYOK config). Sub-agents keep their
             default Gemini variants.
     """
-    from app.agents.specialized_agents import SPECIALIZED_AGENTS
-
     return _build_executive_agent(
         model_override if model_override is not None else get_routing_model(),
-        sub_agents=SPECIALIZED_AGENTS,
+        sub_agents=_default_sub_agents_for_mode(persona=persona),
         persona=persona,
     )
 
@@ -506,10 +533,8 @@ def __getattr__(name: str):
 
     if name in ("executive_agent", "root_agent"):
         if _executive_agent is None:
-            from app.agents.specialized_agents import SPECIALIZED_AGENTS
-
             _executive_agent = _build_executive_agent(
-                get_routing_model(), sub_agents=SPECIALIZED_AGENTS
+                get_routing_model(), sub_agents=_default_sub_agents_for_mode()
             )
         return _executive_agent
 
@@ -524,16 +549,14 @@ def __getattr__(name: str):
         # W3 Section B (B-Alpha-Plus): build the OPPOSITE variant of what
         # production uses so the shadow router can compare the two.
         if _executive_agent_shadow_candidate is None:
-            from app.agents.specialized_agents import SPECIALIZED_AGENTS
-
             if _USE_MANIFESTS:
                 _executive_agent_shadow_candidate = _build_executive_agent_legacy(
-                    get_routing_model(), sub_agents=SPECIALIZED_AGENTS
+                    get_routing_model(), sub_agents=_build_fallback_sub_agents()
                 )
             else:
                 _executive_agent_shadow_candidate = (
                     _build_executive_agent_from_manifest(
-                        get_routing_model(), sub_agents=SPECIALIZED_AGENTS
+                        get_routing_model(), sub_agents=None
                     )
                 )
         return _executive_agent_shadow_candidate

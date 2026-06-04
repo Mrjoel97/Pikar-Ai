@@ -117,6 +117,22 @@ class AgentManifest(BaseModel):
 # =============================================================================
 
 
+def _tool_declaration_name(tool: object) -> str | None:
+    """Return the model-visible declaration name for a tool callable."""
+    name = getattr(tool, "__name__", None) or getattr(tool, "name", None)
+    return str(name) if name else None
+
+
+def _append_unique_tool(flat: list, seen_names: set[str], obj: object) -> None:
+    name = _tool_declaration_name(obj)
+    if name:
+        if name in seen_names:
+            logger.warning("manifest: duplicate tool %s skipped", name)
+            return
+        seen_names.add(name)
+    flat.append(obj)
+
+
 def resolve_tool_modules(modules: list[str]) -> list:
     """Import each module path and collect the ``*_TOOLS`` exports.
 
@@ -138,6 +154,7 @@ def resolve_tool_modules(modules: list[str]) -> list:
         A flat list of tool callables.
     """
     flat: list = []
+    seen_names: set[str] = set()
     for ref in modules:
         attr_name: str | None = None
         module_path = ref
@@ -158,9 +175,10 @@ def resolve_tool_modules(modules: list[str]) -> list:
                 )
                 continue
             if isinstance(obj, list):
-                flat.extend(obj)
+                for item in obj:
+                    _append_unique_tool(flat, seen_names, item)
             else:
-                flat.append(obj)
+                _append_unique_tool(flat, seen_names, obj)
             continue
 
         # Auto-detect *_TOOLS (or *_TOOLS_LIST) export.
@@ -175,7 +193,8 @@ def resolve_tool_modules(modules: list[str]) -> list:
             continue
         # Stable ordering -- in the rare case of multiple, splat all.
         for cand in sorted(candidates):
-            flat.extend(getattr(mod, cand))
+            for item in getattr(mod, cand):
+                _append_unique_tool(flat, seen_names, item)
 
     return flat
 
@@ -391,7 +410,7 @@ MANIFESTS: dict[str, AgentManifest] = {
             "app.agents.tools.system_knowledge:search_system_knowledge",
             "app.agents.tools.document_gen",
             "app.agents.tools.stripe_tools",
-            "app.agents.tools.shopify_tools",
+            "app.agents.tools.shopify_tools:SHOPIFY_TOOLS",
             "app.agents.tools.quick_research",
             "app.mcp.agent_tools:mcp_web_search",
         ],
@@ -1068,9 +1087,9 @@ MANIFESTS: dict[str, AgentManifest] = {
 
 
 __all__ = [
-    "AgentManifest",
     "INSTRUCTION_BLOCK_ORDER",
     "MANIFESTS",
+    "AgentManifest",
     "compose_instruction",
     "compose_routing_table",
     "resolve_tool_modules",

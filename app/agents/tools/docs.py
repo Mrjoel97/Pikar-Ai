@@ -34,6 +34,10 @@ def _build_document_widget(
     has a `data` dict, so we shape the return to match.
     """
     data: dict[str, Any] = {
+        "documentUrl": doc_url,
+        "title": title,
+        "fileType": "gdoc",
+        "sizeBytes": 0,
         "url": doc_url,
         "doc_id": doc_id,
         "kind": kind,

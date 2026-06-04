@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from app.agent import _EXECUTIVE_TOOLS
-from app.agents.content.agent import CONTENT_DIRECTOR_INSTRUCTION
 from app.agents.tools.document_gen import (
     DOCUMENT_GEN_TOOLS,
     generate_pdf_report,
@@ -18,6 +17,7 @@ from app.agents.tools.document_gen import (
 from app.services.document_service import VALID_TEMPLATES
 
 EXECUTIVE_PROMPT_PATH = Path("app/prompts/executive_instruction.txt")
+CONTENT_INSTRUCTION_PATH = Path("app/agents/content/instructions.md")
 
 
 def _tool_names(tools) -> set[str]:
@@ -28,12 +28,28 @@ def test_executive_tools_includes_document_gen() -> None:  # SC1
     names = _tool_names(_EXECUTIVE_TOOLS)
     assert "generate_pdf_report" in names
     assert "generate_pitch_deck" in names
+    assert "generate_spreadsheet_workbook" in names
+
+
+def test_executive_tools_include_workspace_and_media_artifacts() -> None:
+    names = _tool_names(_EXECUTIVE_TOOLS)
+    assert "create_document" in names
+    assert "create_report_doc" in names
+    assert "create_custom_spreadsheet" in names
+    assert "create_custom_form" in names
+    assert "send_email" in names
+    assert "create_calendar_event" in names
+    assert "create_image" in names
+    assert "create_video_with_veo" in names
 
 
 def test_executive_instruction_names_doc_tools() -> None:  # SC2 (names)
     text = EXECUTIVE_PROMPT_PATH.read_text(encoding="utf-8")
     assert "generate_pdf_report" in text
     assert "generate_pitch_deck" in text
+    assert "generate_spreadsheet_workbook" in text
+    assert "Never create media" not in text
+    assert "Never create documents directly" not in text
 
 
 def test_executive_instruction_lists_pdf_templates() -> None:  # SC2 (templates)
@@ -43,7 +59,7 @@ def test_executive_instruction_lists_pdf_templates() -> None:  # SC2 (templates)
 
 
 def test_content_director_instruction_mentions_doc_gen() -> None:  # SC3
-    text = CONTENT_DIRECTOR_INSTRUCTION
+    text = CONTENT_INSTRUCTION_PATH.read_text(encoding="utf-8")
     assert "generate_pdf_report" in text
     assert "generate_pitch_deck" in text
     # Capability mention (SC3 literal: "PDF and PowerPoint generation capability")

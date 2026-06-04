@@ -177,9 +177,20 @@ def agent_tool(func: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def sanitize_tools(tools: list[Callable]) -> list[Callable]:
-    """Apply agent_tool to every function in *tools* that has Dict params.
+    """Apply agent_tool and remove duplicate model-visible tool names.
 
     Called centrally in the tool registry so individual tool modules
     don't need to import or apply the decorator themselves.
     """
-    return [agent_tool(t) for t in tools]
+    sanitized: list[Callable] = []
+    seen_names: set[str] = set()
+    for tool in tools:
+        name = getattr(tool, "__name__", None) or getattr(tool, "name", None)
+        if name:
+            name = str(name)
+            if name in seen_names:
+                logger.warning("agent_tool: duplicate tool %s skipped", name)
+                continue
+            seen_names.add(name)
+        sanitized.append(agent_tool(tool))
+    return sanitized

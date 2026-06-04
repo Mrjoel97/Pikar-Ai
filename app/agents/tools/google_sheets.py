@@ -34,6 +34,10 @@ def _build_sheet_widget(
     `google_sheet` so the frontend can distinguish if it wants to.
     """
     data: dict[str, Any] = {
+        "documentUrl": doc_url,
+        "title": title,
+        "fileType": "gsheet",
+        "sizeBytes": 0,
         "url": doc_url,
         "doc_id": doc_id,
         "kind": "google_sheet",

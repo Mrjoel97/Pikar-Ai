@@ -10,12 +10,77 @@ Provides tools for creating surveys and collecting customer feedback.
 """
 
 import logging
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Tool context type
 ToolContextType = Any
+
+
+def _build_form_widget(
+    *,
+    title: str,
+    form_id: str,
+    form_url: str,
+    edit_url: str | None = None,
+    kind: str = "google_form",
+    extra_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a frontend-compatible document widget for a Google Form."""
+    data: dict[str, Any] = {
+        "documentUrl": form_url,
+        "title": title,
+        "fileType": "gform",
+        "sizeBytes": 0,
+        "url": form_url,
+        "doc_id": form_id,
+        "form_id": form_id,
+        "kind": kind,
+    }
+    if edit_url:
+        data["editUrl"] = edit_url
+    if extra_data:
+        data.update({k: v for k, v in extra_data.items() if v is not None})
+    return {
+        "type": "document",
+        "title": title,
+        "data": data,
+        "widget_id": str(uuid.uuid4()),
+        "dismissible": True,
+        "expandable": True,
+    }
+
+
+def _persist_form_widget(
+    tool_context: ToolContextType,
+    widget: dict[str, Any],
+) -> None:
+    """Best-effort mirror of the form widget into chat_widgets."""
+    try:
+        from app.services.chat_widget_persistence import persist_chat_widget
+
+        user_id = None
+        session_id = None
+        try:
+            user_id = tool_context.state.get("user_id")
+            session_id = tool_context.state.get("session_id")
+        except Exception:
+            user_id = None
+
+        if session_id:
+            data = dict(widget.get("data") or {})
+            data.setdefault("session_id", session_id)
+            widget["data"] = data
+
+        persist_chat_widget(
+            user_id=user_id,
+            widget=widget,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        logger.warning("chat_widgets persistence skipped (form): %s", exc)
 
 
 def _track_created_form(
@@ -119,7 +184,18 @@ def create_feedback_form(
             metadata={"business_name": business_name},
         )
 
+        widget = _build_form_widget(
+            title=form.title,
+            form_id=form.id,
+            form_url=form.url,
+            edit_url=form.edit_url,
+            kind="google_feedback_form",
+            extra_data={"business_name": business_name},
+        )
+        _persist_form_widget(tool_context, widget)
+
         return {
+            **widget,
             "status": "success",
             "message": f"Feedback form '{title}' created",
             "form": {
@@ -190,7 +266,21 @@ def create_custom_form(
             metadata={"description": description, "question_count": len(questions)},
         )
 
+        widget = _build_form_widget(
+            title=form.title,
+            form_id=form.id,
+            form_url=form.url,
+            edit_url=form.edit_url,
+            kind="google_custom_form",
+            extra_data={
+                "description": description,
+                "question_count": len(questions),
+            },
+        )
+        _persist_form_widget(tool_context, widget)
+
         return {
+            **widget,
             "status": "success",
             "message": f"Form '{title}' created with {len(questions)} questions",
             "form": {

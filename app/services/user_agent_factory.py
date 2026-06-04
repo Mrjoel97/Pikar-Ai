@@ -531,6 +531,7 @@ class UserAgentFactory:
             return self._cache[user_id_str]
 
         config = await self.get_user_config(user_id)
+        persona = await self._resolve_persona(user_id, config)
 
         if config and config.get("system_prompt_override"):
             instruction = str(config["system_prompt_override"])
@@ -543,7 +544,6 @@ class UserAgentFactory:
                         instruction, business_context
                     )
 
-                persona = await self._resolve_persona(user_id, config)
                 if persona:
                     instruction = self._inject_persona_context(instruction, persona)
 
@@ -558,33 +558,18 @@ class UserAgentFactory:
         # build_agent_identity_section() in get_runtime_personalization().
         agent_name = "ExecutiveAgent"
 
-        try:
-            from app.agent import _EXECUTIVE_TOOLS as executive_tools
-        except Exception:
-            executive_tools = []
+        from app.agent import _build_executive_agent
+        from app.agents.shared import get_routing_model
 
-        from google.adk.agents import Agent
-
-        from app.agents.context_extractor import (
-            context_memory_after_tool_callback,
-            context_memory_before_model_callback,
-    tool_progress_before_tool_callback,
-)
-        from app.agents.shared import ROUTING_AGENT_CONFIG, get_routing_model
-        from app.agents.specialized_agents import SPECIALIZED_AGENTS
-
-        agent = Agent(
-            name=agent_name,
-            model=get_routing_model(),
-            description="Chief of Staff / Central Orchestrator - Personalized for user",
-            instruction=instruction,
-            tools=executive_tools,
-            sub_agents=SPECIALIZED_AGENTS,
-            generate_content_config=ROUTING_AGENT_CONFIG,
-            before_model_callback=context_memory_before_model_callback,
-            before_tool_callback=tool_progress_before_tool_callback,
-            after_tool_callback=context_memory_after_tool_callback,
+        agent = _build_executive_agent(
+            get_routing_model(),
+            sub_agents=None,
+            persona=persona,
         )
+        agent.description = (
+            "Chief of Staff / Central Orchestrator - Personalized for user"
+        )
+        agent.instruction = instruction
 
         if use_cache:
             self._cache[user_id_str] = agent

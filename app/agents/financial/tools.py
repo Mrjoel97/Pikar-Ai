@@ -21,9 +21,18 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.agents.financial.claims import (
+    emit_expense_pattern,
+    emit_financial_anomaly,
+    emit_margin_signal,
+    emit_reconciliation_finding,
+    emit_revenue_forecast,
+    emit_revenue_trend,
+)
 from app.agents.runtime.operations_config import OperationsConfig
 from app.agents.runtime.tools_manifest import ToolsManifest
 from app.services.intelligence import (
@@ -36,6 +45,14 @@ from app.services.intelligence.presets import financial_confidence
 from app.services.supabase_async import execute_async
 
 _logger = logging.getLogger(__name__)
+
+
+async def _safe_emit(coro_factory: Callable[[], Awaitable[Any]]) -> None:
+    """Run a claim emit best-effort; the user-facing response wins."""
+    try:
+        await coro_factory()
+    except Exception as e:
+        _logger.warning("Financial claim emit failed: %s", e)
 
 
 def _get_current_user_id() -> str | None:
@@ -232,13 +249,27 @@ async def get_revenue_stats(
         source_authority = _source_authority_from_breakdown(
             stats.get("source_breakdown"),
         )
-        return _attach_confidence(
+        response = _attach_confidence(
             {"success": True, **stats},
             data_completeness=data_completeness,
             reconciliation_signal=1.0,  # not applicable for revenue-only view
             horizon_certainty=1.0,
             source_authority=source_authority,
         )
+        narrative = (
+            f"Revenue for {period}: {response.get('revenue')} "
+            f"{response.get('currency', 'USD')} across "
+            f"{response.get('transaction_count', 0)} transactions."
+        )
+        await _safe_emit(
+            lambda: emit_revenue_trend(
+                period=period,
+                finding_text=narrative,
+                confidence=float(response["confidence"]),
+                sources=[{"kind": "stripe_row", "ref": f"agg/{period}"}],
+            )
+        )
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -267,6 +298,7 @@ async def get_cash_position() -> dict:
         outflows = 0.0
         currency = "USD"
         source_counts: dict[str, int] = {}
+        outflow_totals: dict[str, float] = {}
         for record in records:
             amount = record.get("amount")
             if not isinstance(amount, (int, float)):
@@ -275,16 +307,25 @@ async def get_cash_position() -> dict:
             record_type = str(record.get("transaction_type") or "").strip().lower()
             numeric_amount = float(amount)
             if record_type in outflow_types:
-                outflows += abs(numeric_amount)
+                outflow_amount = abs(numeric_amount)
+                outflows += outflow_amount
+                outflow_totals[record_type] = (
+                    outflow_totals.get(record_type, 0.0) + outflow_amount
+                )
             elif record_type in inflow_types or numeric_amount >= 0:
                 inflows += numeric_amount
             else:
-                outflows += abs(numeric_amount)
+                outflow_amount = abs(numeric_amount)
+                outflows += outflow_amount
+                category = record_type or "expense"
+                outflow_totals[category] = (
+                    outflow_totals.get(category, 0.0) + outflow_amount
+                )
             src = str(record.get("source_type") or "manual").lower()
             source_counts[src] = source_counts.get(src, 0) + 1
 
         cash_position = round(inflows - outflows, 2)
-        return _attach_confidence(
+        response = _attach_confidence(
             {
                 "success": True,
                 "cash_position": cash_position,
@@ -305,6 +346,43 @@ async def get_cash_position() -> dict:
             horizon_certainty=1.0,
             source_authority=_source_authority_from_breakdown(source_counts),
         )
+        residual = abs((inflows - outflows) - cash_position)
+        material_residual = (
+            residual >= 1000.0
+            or (residual / max(1.0, abs(float(cash_position)))) >= 0.01
+        )
+        if material_residual:
+            await _safe_emit(
+                lambda: emit_reconciliation_finding(
+                    period="current_month",
+                    residual=residual,
+                    cash_position=cash_position,
+                    finding_text=(
+                        f"Cash reconciliation residual {round(residual, 2)} on "
+                        f"cash position {cash_position} ({currency})."
+                    ),
+                    confidence=float(response["confidence"]),
+                    sources=[{"kind": "supabase_row", "ref": "financial_records"}],
+                )
+            )
+        elif outflow_totals:
+            category, amount = max(outflow_totals.items(), key=lambda item: item[1])
+            outflow_share = round((amount / max(1.0, outflows)) * 100, 1)
+            narrative = (
+                f"Expense pattern for current_month: {category} accounts for "
+                f"{outflow_share}% of tracked outflows "
+                f"({round(amount, 2)} {currency})."
+            )
+            await _safe_emit(
+                lambda: emit_expense_pattern(
+                    category=category,
+                    period="current_month",
+                    finding_text=narrative,
+                    confidence=float(response["confidence"]),
+                    sources=[{"kind": "supabase_row", "ref": "financial_records"}],
+                )
+            )
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -360,7 +438,7 @@ async def get_burn_runway_report(monthly_burn: float | None = None) -> dict:
             round(available_cash / estimated_burn, 2) if estimated_burn > 0 else None
         )
 
-        return _attach_confidence(
+        response = _attach_confidence(
             {
                 "success": True,
                 "cash_position": available_cash,
@@ -383,6 +461,20 @@ async def get_burn_runway_report(monthly_burn: float | None = None) -> dict:
             horizon_certainty=1.0,  # historical 90-day analysis
             source_authority=_source_authority_from_breakdown(source_counts),
         )
+        if estimated_burn > 0 and runway_months is not None:
+            narrative = (
+                f"Burn-runway: monthly_burn={estimated_burn}, "
+                f"runway_months={runway_months}, calculation_window=90d."
+            )
+            await _safe_emit(
+                lambda: emit_margin_signal(
+                    period="last_90_days",
+                    finding_text=narrative,
+                    confidence=float(response["confidence"]),
+                    sources=[{"kind": "stripe_row", "ref": "burn/90d"}],
+                )
+            )
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -405,6 +497,7 @@ async def get_financial_report(period: str = "current_month") -> dict:
         revenue = await get_revenue_stats(period)
         cash = await get_cash_position()
         runway = await get_burn_runway_report()
+        # Child tools emit their own claims; a composite emit would double-write.
         composite_conf = min(
             float(revenue.get("confidence", 0.0) or 0.0),
             float(cash.get("confidence", 0.0) or 0.0),
@@ -789,13 +882,30 @@ async def generate_financial_forecast(
             else 0.7
         )
 
-        return _attach_confidence(
+        response = _attach_confidence(
             {"success": True, **result},
             data_completeness=data_completeness,
             reconciliation_signal=0.9,  # forecast doesn't reconcile against cash
             horizon_certainty=_horizon_certainty(months_ahead),
             source_authority=source_authority,
         )
+        projections = result.get("monthly_projections") or []
+        first = projections[0] if projections else {}
+        narrative = (
+            f"Forecast (horizon {months_ahead}m): first month ~"
+            f"{first.get('revenue', 'N/A')} based on "
+            f"{result.get('methodology', 'unknown')} over "
+            f"{result.get('sample_size', 0)} samples."
+        )
+        await _safe_emit(
+            lambda: emit_revenue_forecast(
+                months_ahead=months_ahead,
+                finding_text=narrative,
+                confidence=float(response["confidence"]),
+                sources=[{"kind": "stripe_row", "ref": f"forecast/{months_ahead}m"}],
+            )
+        )
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -828,13 +938,27 @@ async def get_financial_health_score() -> dict:
 
         svc = FinancialHealthScoreService()
         result = await svc.compute_health_score(user_id)
-        return _attach_confidence(
+        response = _attach_confidence(
             {"success": True, **result},
             data_completeness=float(result.get("data_completeness", 0.8)),
             reconciliation_signal=float(result.get("reconciliation_signal", 0.85)),
             horizon_certainty=1.0,  # health score is point-in-time
             source_authority=float(result.get("source_authority", 0.75)),
         )
+        if response.get("band") == "low" or int(result.get("score", 100)) < 50:
+            await _safe_emit(
+                lambda: emit_financial_anomaly(
+                    probe="health_score_low",
+                    finding_text=(
+                        f"Financial health score {result.get('score')} "
+                        f"(band={response.get('band')}): "
+                        f"{result.get('explanation', '')}"
+                    ),
+                    confidence=float(response["confidence"]),
+                    sources=[{"kind": "other", "ref": "health_score_service"}],
+                )
+            )
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -898,6 +1022,14 @@ async def render_financial_health_score_widget() -> dict:
 # =============================================================================
 # Tools manifest — declarative tool surface for PikarBaseAgent factory.
 # =============================================================================
+
+
+FINANCIAL_TOOLS = [
+    get_revenue_stats,
+    get_financial_health_score,
+    run_financial_scenario,
+    generate_financial_forecast,
+]
 
 
 # Tool ids are the module names under ``app/agents/tools/`` for shared tool

@@ -13,7 +13,6 @@ import os
 
 import pytest
 
-
 # Each entry: (registry_key, expected_agent_class_name)
 EXPECTED_AGENTS: list[tuple[str, str]] = [
     ("executive", "ExecutiveAgent"),
@@ -164,6 +163,26 @@ class TestResolveToolModules:
         )
         assert len(tools) == 1
         assert callable(tools[0])
+
+    def test_resolves_overlapping_tools_exports_once(self):
+        from app.agents.manifest import resolve_tool_modules
+
+        tools = resolve_tool_modules(["app.agents.tools.shopify_tools"])
+        names = [getattr(tool, "__name__", "") for tool in tools]
+
+        assert names.count("get_shopify_orders") == 1
+        assert names.count("get_shopify_analytics") == 1
+        assert len(names) == len(set(names))
+
+    def test_financial_manifest_resolves_local_tools(self):
+        from app.agents.manifest import resolve_tool_modules
+
+        tools = resolve_tool_modules(["app.agents.financial.tools"])
+        names = {getattr(tool, "__name__", "") for tool in tools}
+
+        assert "get_revenue_stats" in names
+        assert "run_financial_scenario" in names
+        assert "generate_financial_forecast" in names
 
     def test_missing_module_logs_and_skips(self):
         from app.agents.manifest import resolve_tool_modules
