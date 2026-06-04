@@ -156,6 +156,10 @@ class CacheService:
             self._password = os.getenv("REDIS_PASSWORD")
             self._db = int(os.getenv("REDIS_DB", 0))
             self._max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", "200"))
+            self._socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "3.0"))
+            self._socket_connect_timeout = float(
+                os.getenv("REDIS_CONNECT_TIMEOUT_SECONDS", "1.0")
+            )
             self._ssl = os.getenv("REDIS_SSL", "").lower() in ("1", "true", "yes")
             self._redis_enabled = True
             self._disabled_reason: str | None = None
@@ -325,8 +329,8 @@ class CacheService:
                 self._redis_url,
                 max_connections=self._max_connections,
                 decode_responses=True,
-                socket_timeout=5.0,
-                socket_connect_timeout=5.0,
+                socket_timeout=self._socket_timeout,
+                socket_connect_timeout=self._socket_connect_timeout,
                 retry_on_timeout=True,
             )
         return redis.Redis(
@@ -336,8 +340,8 @@ class CacheService:
             db=self._db,
             max_connections=self._max_connections,
             decode_responses=True,
-            socket_timeout=5.0,
-            socket_connect_timeout=5.0,
+            socket_timeout=self._socket_timeout,
+            socket_connect_timeout=self._socket_connect_timeout,
             retry_on_timeout=True,
             ssl=self._ssl,
         )

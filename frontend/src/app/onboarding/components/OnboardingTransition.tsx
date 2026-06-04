@@ -119,8 +119,10 @@ export function OnboardingTransition({
       setIsComplete(true);
       onComplete(); // Clear session storage
 
-      // Set cookie so Next.js middleware skips DB check on future requests
+      // Set cookies so the proxy has the completed state for the immediate dashboard redirect.
       document.cookie = 'pikar_onboarding_complete=true; path=/; max-age=2592000; samesite=lax';
+      document.cookie = 'x-pikar-onboarded=true; path=/; max-age=300; samesite=lax';
+      document.cookie = `x-pikar-persona=${persona}; path=/; max-age=300; samesite=lax`;
 
       // Navigate to dashboard with first action as initial prompt
       setTimeout(() => {
@@ -132,13 +134,16 @@ export function OnboardingTransition({
       console.error('Onboarding completion failed:', err);
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     }
-  }, [agentName, extractedContext, preferences, firstAction, firstActionId, onComplete, router]);
+  }, [agentName, extractedContext, preferences, firstAction, firstActionId, onComplete, persona, router]);
 
   // Run once on mount (ref guard prevents re-runs from dependency changes)
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
-    runOnboarding();
+    const timer = window.setTimeout(() => {
+      void runOnboarding();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [runOnboarding]);
 
   const handleRetry = () => {

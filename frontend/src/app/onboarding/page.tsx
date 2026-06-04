@@ -11,7 +11,6 @@ import { OnboardingChat } from './components/OnboardingChat';
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -22,10 +21,8 @@ export default function OnboardingPage() {
           router.replace('/dashboard/command-center');
           return;
         }
-        setIsReady(true);
       } catch {
         // If status check fails, show onboarding anyway (new user)
-        setIsReady(true);
       } finally {
         setIsLoading(false);
       }
@@ -48,8 +45,6 @@ export default function OnboardingPage() {
       </div>
     );
   }
-
-  if (!isReady) return null;
 
   return <OnboardingChat />;
 }

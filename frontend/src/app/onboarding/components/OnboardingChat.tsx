@@ -224,15 +224,23 @@ export function OnboardingChat() {
     }
     hasInitialized.current = true;
 
-    addAgentMessage(
-      "Hey! I'm really excited to meet you. I'm going to be your AI executive partner \u2014 helping you think through strategy, manage operations, and grow your business.\n\nBut first, I'd love a name. What would you like to call me?"
-    );
-
-    // After greeting, show name suggestions
-    safeTimeout(() => {
-      setState((prev) => ({ ...prev, phase: 'agent_name' }));
-    }, 2200);
-  }, [state.messages.length, addAgentMessage, safeTimeout]);
+    const timestamp = Date.now();
+    setIsTyping(false);
+    setState((prev) => ({
+      ...prev,
+      phase: 'agent_name',
+      messages: [
+        ...prev.messages,
+        {
+          id: `agent-${timestamp}`,
+          role: 'agent',
+          content:
+            "Hey! I'm really excited to meet you. I'm going to be your AI executive partner \u2014 helping you think through strategy, manage operations, and grow your business.\n\nBut first, I'd love a name. What would you like to call me?",
+          timestamp,
+        },
+      ],
+    }));
+  }, [state.messages.length]);
 
   // Handle user message submission
   const handleSubmit = async (e?: React.FormEvent) => {

@@ -33,7 +33,7 @@ const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'pointe
 const SESSION_FAIL_TOLERANCE = 3;
 
 export function useSessionMonitor() {
-  const lastActivityRef = useRef<number>(Date.now());
+  const lastActivityRef = useRef<number>(0);
   const isRedirectingRef = useRef(false);
   const consecutiveFailuresRef = useRef(0);
 
@@ -62,12 +62,14 @@ export function useSessionMonitor() {
     if (typeof window === 'undefined') return;
 
     // Skip session monitoring on public pages where no session is expected
-    const publicPaths = ['/', '/auth', '/privacy', '/terms', '/data-deletion'];
+    const publicPaths = ['/', '/auth', '/privacy', '/terms', '/data-deletion', '/invite'];
     const pathname = window.location.pathname;
     const isPublicPage = publicPaths.some(path =>
       pathname === path || pathname.startsWith(path + '/')
     );
     if (isPublicPage) return;
+
+    lastActivityRef.current = Date.now();
 
     const supabase = createClient();
 

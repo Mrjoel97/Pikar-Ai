@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signUp, signInWithGoogle } from '../../../services/auth';
 import Link from 'next/link';
@@ -56,14 +56,11 @@ export default function SignupPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-    // Prefetch the onboarding route so navigation is instant after signup
-    useEffect(() => {
-        router.prefetch('/onboarding');
-    }, [router]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -260,15 +257,31 @@ export default function SignupPage() {
                                                 className="w-full bg-white/10 border border-white/20 rounded-lg py-2 pl-9 pr-9 text-white placeholder-teal-300/40 focus:outline-none focus:ring-2 focus:ring-teal-400/50 focus:border-transparent transition-all duration-200 font-medium text-sm min-h-[44px]"
                                                 id="password"
                                                 placeholder="Create a password"
-                                                type="password"
+                                                type={showPassword ? 'text' : 'password'}
                                                 value={password}
                                                 onChange={(e) => setPassword(e.target.value)}
                                                 required
                                             />
-                                            <button className="absolute right-3 top-1/2 -translate-y-1/2 text-teal-300/60 hover:text-white transition-colors cursor-pointer" type="button">
+                                            <button
+                                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                                aria-pressed={showPassword}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-teal-300/60 hover:text-white transition-colors cursor-pointer"
+                                                type="button"
+                                                onClick={() => setShowPassword((current) => !current)}
+                                            >
                                                 <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
-                                                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                                                    {showPassword ? (
+                                                        <>
+                                                            <path d="M3 3l18 18" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                                                            <path d="M10.6 10.6A3 3 0 0 0 14 14" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                                                            <path d="M7.4 7.6C3.6 9.4 1 12 1 12s4 8 11 8c1.8 0 3.4-.5 4.8-1.2M10 4.2c.7-.1 1.3-.2 2-.2 7 0 11 8 11 8s-.9 1.8-2.6 3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
+                                                            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                                                        </>
+                                                    )}
                                                 </svg>
                                             </button>
                                         </div>
@@ -282,14 +295,36 @@ export default function SignupPage() {
                                                 <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" />
                                             </svg>
                                             <input
-                                                className="w-full bg-white/10 border border-white/20 rounded-lg py-2 pl-9 pr-3 text-white placeholder-teal-300/40 focus:outline-none focus:ring-2 focus:ring-teal-400/50 focus:border-transparent transition-all duration-200 font-medium text-sm min-h-[44px]"
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg py-2 pl-9 pr-9 text-white placeholder-teal-300/40 focus:outline-none focus:ring-2 focus:ring-teal-400/50 focus:border-transparent transition-all duration-200 font-medium text-sm min-h-[44px]"
                                                 id="confirmPassword"
                                                 placeholder="Confirm password"
-                                                type="password"
+                                                type={showConfirmPassword ? 'text' : 'password'}
                                                 value={confirmPassword}
                                                 onChange={(e) => setConfirmPassword(e.target.value)}
                                                 required
                                             />
+                                            <button
+                                                aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                                                aria-pressed={showConfirmPassword}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-teal-300/60 hover:text-white transition-colors cursor-pointer"
+                                                type="button"
+                                                onClick={() => setShowConfirmPassword((current) => !current)}
+                                            >
+                                                <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
+                                                    {showConfirmPassword ? (
+                                                        <>
+                                                            <path d="M3 3l18 18" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                                                            <path d="M10.6 10.6A3 3 0 0 0 14 14" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                                                            <path d="M7.4 7.6C3.6 9.4 1 12 1 12s4 8 11 8c1.8 0 3.4-.5 4.8-1.2M10 4.2c.7-.1 1.3-.2 2-.2 7 0 11 8 11 8s-.9 1.8-2.6 3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
+                                                            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                                                        </>
+                                                    )}
+                                                </svg>
+                                            </button>
                                         </div>
                                     </div>
 

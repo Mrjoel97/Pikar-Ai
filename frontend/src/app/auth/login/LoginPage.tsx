@@ -56,16 +56,12 @@ export default function LoginPage() {
     const searchParams = useSearchParams();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const sessionExpired = searchParams.get('reason') === 'session_expired';
     const callbackError = searchParams.get('error');
     const callbackErrorDescription = searchParams.get('error_description');
-
-    // Prefetch the command center route so navigation is instant after login
-    useEffect(() => {
-        router.prefetch('/dashboard/command-center');
-    }, [router]);
 
     useEffect(() => {
         if (!callbackError) {
@@ -250,15 +246,31 @@ export default function LoginPage() {
                                                 className="w-full bg-white/10 border border-white/20 rounded-lg py-2.5 pl-10 pr-10 text-white placeholder-teal-300/40 focus:outline-none focus:ring-2 focus:ring-teal-400/50 focus:border-transparent transition-all duration-200 font-medium text-sm min-h-[44px]"
                                                 id="password"
                                                 placeholder="Enter your password"
-                                                type="password"
+                                                type={showPassword ? 'text' : 'password'}
                                                 value={password}
                                                 onChange={(e) => setPassword(e.target.value)}
                                                 required
                                             />
-                                            <button className="absolute right-3 top-1/2 -translate-y-1/2 text-teal-300/60 hover:text-white transition-colors cursor-pointer" type="button">
+                                            <button
+                                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                                aria-pressed={showPassword}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-teal-300/60 hover:text-white transition-colors cursor-pointer"
+                                                type="button"
+                                                onClick={() => setShowPassword((current) => !current)}
+                                            >
                                                 <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
-                                                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                                                    {showPassword ? (
+                                                        <>
+                                                            <path d="M3 3l18 18" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                                                            <path d="M10.6 10.6A3 3 0 0 0 14 14" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                                                            <path d="M7.4 7.6C3.6 9.4 1 12 1 12s4 8 11 8c1.8 0 3.4-.5 4.8-1.2M10 4.2c.7-.1 1.3-.2 2-.2 7 0 11 8 11 8s-.9 1.8-2.6 3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
+                                                            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                                                        </>
+                                                    )}
                                                 </svg>
                                             </button>
                                         </div>

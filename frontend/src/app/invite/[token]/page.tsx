@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
-import { fetchPublicApi, fetchWithAuth } from '@/services/api';
+import { fetchWithAuth } from '@/services/api';
 import { WorkspaceProvider, useWorkspace } from '@/contexts/WorkspaceContext';
 
 type InviteViewState = 'loading' | 'ready' | 'accepting' | 'success' | 'error';
@@ -67,6 +67,9 @@ function InvitePageShimmer() {
         <div className="mb-3 h-16 rounded-xl bg-slate-100" />
         <div className="h-10 rounded-xl bg-slate-100" />
       </div>
+      <p className="sr-only" role="status">
+        Loading invitation details
+      </p>
     </InviteShell>
   );
 }
@@ -102,11 +105,9 @@ function AcceptInvitation({ token }: { token: string }) {
       try {
         const supabase = createClient();
         const [inviteResponse, authResult] = await Promise.all([
-          fetchPublicApi(
-            `/teams/invites/details?token=${encodeURIComponent(token)}`,
-            { cache: 'no-store' },
-            false,
-          ),
+          fetch(`/api/teams/invites/details?token=${encodeURIComponent(token)}`, {
+            cache: 'no-store',
+          }),
           supabase.auth.getUser(),
         ]);
 
@@ -119,7 +120,9 @@ function AcceptInvitation({ token }: { token: string }) {
               ? payload.error
               : typeof payload.detail === 'string'
                 ? payload.detail
-                : 'This invitation is no longer valid.',
+                : typeof payload.message === 'string'
+                  ? payload.message
+                  : 'This invitation is no longer valid.',
           );
         }
 

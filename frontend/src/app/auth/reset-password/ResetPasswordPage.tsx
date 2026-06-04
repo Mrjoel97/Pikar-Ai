@@ -9,6 +9,8 @@ export default function ResetPasswordPage() {
     const router = useRouter();
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [showNewPassword, setShowNewPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
@@ -54,9 +56,11 @@ export default function ResetPasswordPage() {
                 <main className="relative z-10 w-full max-w-[480px] px-4 sm:px-0">
                     {/* Logo */}
                     <div className="mb-8 flex justify-center">
-                        <div className="flex items-center gap-3 text-[#0d2b2b]">
-                            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#0d2b2b] text-white shadow-lg">
-                                <span className="material-symbols-outlined text-2xl">auto_awesome</span>
+                            <div className="flex items-center gap-3 text-[#0d2b2b]">
+                                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#0d2b2b] text-white shadow-lg">
+                                <svg aria-hidden="true" className="h-6 w-6" fill="none" viewBox="0 0 24 24">
+                                    <path d="m12 3 2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2L12 3Z" fill="currentColor" />
+                                </svg>
                             </div>
                             <span className="text-2xl font-bold tracking-tight">Pikar AI</span>
                         </div>
@@ -96,13 +100,19 @@ export default function ResetPasswordPage() {
                                         className="input-liquid w-full rounded-2xl px-5 py-4 text-white placeholder-teal-400/30 focus:outline-none focus:ring-2 focus:ring-teal-400/50 focus:border-transparent transition-all duration-300 h-14"
                                         id="new-password"
                                         placeholder="••••••••"
-                                        type="password"
+                                        type={showNewPassword ? 'text' : 'password'}
                                         value={newPassword}
                                         onChange={(e) => setNewPassword(e.target.value)}
                                         required
                                     />
-                                    <button className="absolute right-4 text-teal-400/60 hover:text-teal-200 transition-colors cursor-pointer" type="button">
-                                        <span className="material-symbols-outlined text-[20px]">visibility_off</span>
+                                    <button
+                                        aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                                        aria-pressed={showNewPassword}
+                                        className="absolute right-4 text-teal-400/60 hover:text-teal-200 transition-colors cursor-pointer"
+                                        type="button"
+                                        onClick={() => setShowNewPassword((current) => !current)}
+                                    >
+                                        <PasswordVisibilityIcon hidden={!showNewPassword} />
                                     </button>
                                 </div>
                                 {/* Strength Meter */}
@@ -124,13 +134,19 @@ export default function ResetPasswordPage() {
                                         className="input-liquid w-full rounded-2xl px-5 py-4 text-white placeholder-teal-400/30 focus:outline-none focus:ring-2 focus:ring-teal-400/50 focus:border-transparent transition-all duration-300 h-14"
                                         id="confirm-password"
                                         placeholder="••••••••"
-                                        type="password"
+                                        type={showConfirmPassword ? 'text' : 'password'}
                                         value={confirmPassword}
                                         onChange={(e) => setConfirmPassword(e.target.value)}
                                         required
                                     />
-                                    <button className="absolute right-4 text-teal-400/60 hover:text-teal-200 transition-colors cursor-pointer" type="button">
-                                        <span className="material-symbols-outlined text-[20px]">visibility_off</span>
+                                    <button
+                                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                                        aria-pressed={showConfirmPassword}
+                                        className="absolute right-4 text-teal-400/60 hover:text-teal-200 transition-colors cursor-pointer"
+                                        type="button"
+                                        onClick={() => setShowConfirmPassword((current) => !current)}
+                                    >
+                                        <PasswordVisibilityIcon hidden={!showConfirmPassword} />
                                     </button>
                                 </div>
                             </div>
@@ -145,7 +161,11 @@ export default function ResetPasswordPage() {
                                     <span className="text-[#0d2b2b] font-bold text-lg tracking-wide z-10 group-hover/btn:scale-105 transition-transform">
                                         {loading ? 'Updating...' : 'Update Password'}
                                     </span>
-                                    {!loading && <span className="material-symbols-outlined text-[#0d2b2b] z-10 transition-transform group-hover/btn:translate-x-1 text-[20px]">arrow_forward</span>}
+                                    {!loading && (
+                                        <svg aria-hidden="true" className="z-10 h-5 w-5 text-[#0d2b2b] transition-transform group-hover/btn:translate-x-1" fill="none" viewBox="0 0 24 24">
+                                            <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" />
+                                        </svg>
+                                    )}
                                     {/* Subtle shine effect on hover */}
                                     <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/50 to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-500 transform -translate-x-full group-hover/btn:translate-x-full pointer-events-none"></div>
                                 </button>
@@ -155,7 +175,9 @@ export default function ResetPasswordPage() {
                         {/* Footer Link */}
                         <div className="mt-8 text-center relative z-10">
                             <Link className="inline-flex items-center gap-1.5 text-sm text-teal-200/60 hover:text-white transition-colors font-medium group/link" href="/auth/login">
-                                <span className="material-symbols-outlined text-[16px] transition-transform group-hover/link:-translate-x-0.5">arrow_back</span>
+                                <svg aria-hidden="true" className="h-4 w-4 transition-transform group-hover/link:-translate-x-0.5" fill="none" viewBox="0 0 24 24">
+                                    <path d="M19 12H5m6-6-6 6 6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" />
+                                </svg>
                                 Back to Login
                             </Link>
                         </div>
@@ -172,5 +194,24 @@ export default function ResetPasswordPage() {
                 </main>
             </div>
         </div>
+    );
+}
+
+function PasswordVisibilityIcon({ hidden }: { hidden: boolean }) {
+    if (hidden) {
+        return (
+            <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+                <path d="M3 3l18 18" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                <path d="M10.6 10.6A3 3 0 0 0 14 14" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                <path d="M7.4 7.6C3.6 9.4 1 12 1 12s4 8 11 8c1.8 0 3.4-.5 4.8-1.2M10 4.2c.7-.1 1.3-.2 2-.2 7 0 11 8 11 8s-.9 1.8-2.6 3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+            </svg>
+        );
+    }
+
+    return (
+        <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2" />
+            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+        </svg>
     );
 }

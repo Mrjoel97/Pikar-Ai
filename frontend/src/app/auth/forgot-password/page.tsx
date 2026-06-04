@@ -5,6 +5,46 @@ import Link from 'next/link';
 import styles from './styles.module.css';
 import { resetPasswordForEmail } from '@/services/auth';
 
+function MailIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5 text-gray-400"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="m4 7 8 6 8-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4 text-[#0d2b2b] transition-transform duration-300 group-hover/btn:translate-x-1"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" />
+    </svg>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4 transition-transform duration-200 group-hover/link:-translate-x-1"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <path d="M19 12H5m6-6-6 6 6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" />
+    </svg>
+  );
+}
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -28,12 +68,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <>
-      <style jsx global>{`
-                @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
-                .font-manrope { font-family: 'Manrope', sans-serif; }
-            `}</style>
-
-      <div className={`font-manrope antialiased text-gray-900 bg-[#f8f9fa] min-h-screen relative flex items-center justify-center overflow-hidden`}>
+      <div className="font-sans antialiased text-gray-900 bg-[#f8f9fa] min-h-screen relative flex items-center justify-center overflow-hidden">
         <div className={`absolute inset-0 bg-dot-grid opacity-100 z-0 ${styles.bgDotGrid}`}></div>
         <div className={styles.textureOverlay}></div>
         <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-white rounded-full blur-3xl opacity-80"></div>
@@ -64,8 +99,11 @@ export default function ForgotPasswordPage() {
               <form onSubmit={handleSubmit} className="w-full flex flex-col gap-6">
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
-                    <span className="material-symbols-outlined text-gray-400">mail</span>
+                    <MailIcon />
                   </div>
+                  <label className="sr-only" htmlFor="email">
+                    Email address
+                  </label>
                   <input
                     className={`${styles.glassInput} w-full h-14 pl-12 pr-6 rounded-full text-white placeholder-gray-400 focus:outline-none text-base font-medium transition-all duration-300`}
                     id="email"
@@ -86,14 +124,12 @@ export default function ForgotPasswordPage() {
                   <span className="text-[#0d2b2b] text-base font-bold tracking-wide">
                     {isLoading ? 'Sending...' : 'Send Reset Link'}
                   </span>
-                  {!isLoading && (
-                    <span className="material-symbols-outlined text-[#0d2b2b] text-sm transition-transform duration-300 group-hover/btn:translate-x-1">arrow_forward</span>
-                  )}
+                  {!isLoading && <ArrowRightIcon />}
                 </button>
               </form>
               <div className="mt-8 pt-4 border-t border-white/5 w-full">
                 <Link href="/auth/login" className="inline-flex items-center gap-2 text-gray-400 hover:text-white transition-colors duration-200 text-sm font-semibold group/link">
-                  <span className="material-symbols-outlined text-sm transition-transform duration-200 group-hover/link:-translate-x-1">arrow_back</span>
+                  <ArrowLeftIcon />
                   Back to Login
                 </Link>
               </div>

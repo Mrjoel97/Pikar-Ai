@@ -282,6 +282,64 @@ class WorkspaceService:
         )
         return invite
 
+    async def get_invite_details(self, token: str) -> dict[str, Any]:
+        """Return display-safe metadata for a workspace invite token.
+
+        Args:
+            token: The invite token from the public share link.
+
+        Returns:
+            Public invite metadata suitable for rendering before login.
+
+        Raises:
+            ValueError: If the token is invalid, expired, accepted, or revoked.
+        """
+        invite_result = await execute_async(
+            self.client.table("workspace_invites")
+            .select(
+                "id, workspace_id, role, expires_at, accepted_by, is_active, "
+                "workspaces(name)"
+            )
+            .eq("token", token)
+            .limit(1),
+            op_name="workspace_service.get_invite_details",
+        )
+        invites = invite_result.data or []
+        if not invites:
+            raise ValueError("Invite token not found or has already been used.")
+
+        invite = invites[0]
+
+        if not invite.get("is_active"):
+            raise ValueError("This invite link has been revoked.")
+
+        if invite.get("accepted_by"):
+            raise ValueError("This invite link has already been accepted.")
+
+        expires_at_str = invite.get("expires_at")
+        if expires_at_str:
+            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            if datetime.now(UTC) > expires_at:
+                raise ValueError("This invite link has expired.")
+
+        workspace_data = invite.get("workspaces")
+        if isinstance(workspace_data, list):
+            workspace = workspace_data[0] if workspace_data else {}
+        elif isinstance(workspace_data, dict):
+            workspace = workspace_data
+        else:
+            workspace = {}
+
+        return {
+            "id": invite["id"],
+            "workspaceName": workspace.get("name") or "Workspace",
+            "role": invite["role"],
+            "invitedEmail": None,
+            "inviterName": None,
+            "expiresAt": expires_at_str or "",
+            "isActive": bool(invite.get("is_active")),
+        }
+
     async def accept_invite(
         self, token: str, user_id: str
     ) -> dict[str, Any]:
