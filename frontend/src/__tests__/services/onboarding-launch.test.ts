@@ -20,6 +20,15 @@ describe('onboarding launch helpers', () => {
     expect(buildChatLaunchUrl('enterprise', '   ')).toBe('/enterprise')
   })
 
+  it('routes brain dump launch prompts to the voice brain dump entry point', () => {
+    const url = buildChatLaunchUrl('solopreneur', 'I want to do a brain dump')
+    const parsed = new URL(url, 'https://example.com')
+
+    expect(parsed.pathname).toBe('/solopreneur')
+    expect(parsed.searchParams.get('start_braindump')).toBe('1')
+    expect(parsed.searchParams.has('initialPrompt')).toBe(false)
+  })
+
   it('extracts a direct initialPrompt launch request', () => {
     const request = extractDashboardLaunchRequest(
       new URLSearchParams('initialPrompt=Launch+my+first+workflow'),
@@ -57,7 +66,7 @@ describe('onboarding launch helpers', () => {
   it('removes launch params while preserving unrelated query state', () => {
     const cleaned = buildUrlWithoutDashboardLaunchParams(
       '/startup',
-      new URLSearchParams('initialPrompt=Hello&notice=ok&session=session-1'),
+      new URLSearchParams('initialPrompt=Hello&start_braindump=1&notice=ok&session=session-1'),
       ['session'],
     )
 
