@@ -728,10 +728,14 @@ export function SessionControlProvider({
             s.id === sessionId ? { ...s, preview: truncatedPreview } : s,
           ),
         )
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message =
+          err && typeof err === 'object' && 'message' in err
+            ? String((err as { message?: unknown }).message)
+            : String(err)
         console.error(
           'Failed to update session preview:',
-          err.message || err,
+          message,
         )
       }
     },

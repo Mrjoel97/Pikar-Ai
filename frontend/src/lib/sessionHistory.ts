@@ -16,6 +16,35 @@ import type { Message, SessionEvent } from '@/hooks/useAgentChat';
 
 const SESSION_HISTORY_EVENT_LIMIT = 200;
 
+type EventPart = {
+  text?: unknown
+  widget?: unknown
+  function_response?: {
+    response?: unknown
+    response_data?: unknown
+  }
+  functionResponse?: {
+    response?: unknown
+    response_data?: unknown
+  }
+}
+
+function getEventParts(content: unknown): EventPart[] | null {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) {
+    return null
+  }
+
+  const parts = (content as { parts?: unknown }).parts
+  if (!Array.isArray(parts)) {
+    return null
+  }
+
+  return parts.filter(
+    (part): part is EventPart =>
+      Boolean(part) && typeof part === 'object' && !Array.isArray(part),
+  )
+}
+
 /**
  * Apply workspace defaults to a widget definition.
  * Morning briefing widgets are returned as-is; all others default to focus mode.
@@ -104,8 +133,9 @@ export async function loadSessionHistory(
     // --- User messages ---
     if (who === 'user') {
       let text = '';
-      if (event.content?.parts) {
-        text = event.content.parts.map((p: any) => p.text || '').join('');
+      const parts = getEventParts(event.content)
+      if (parts) {
+        text = parts.map((p) => (typeof p.text === 'string' ? p.text : '')).join('');
       } else if (typeof event.content === 'string') {
         text = event.content;
       }
@@ -118,9 +148,10 @@ export async function loadSessionHistory(
       let text = '';
       let widget: WidgetDefinition | undefined;
 
-      if (event.content?.parts) {
-        event.content.parts.forEach((p: any) => {
-          if (p.text) text += p.text;
+      const parts = getEventParts(event.content)
+      if (parts) {
+        parts.forEach((p) => {
+          if (typeof p.text === 'string') text += p.text;
 
           // Widget directly in part
           if (p.widget && validateWidgetDefinition(p.widget)) {
@@ -128,12 +159,9 @@ export async function loadSessionHistory(
           }
 
           // Widget buried in function_response
-          const fr =
-            p?.function_response ??
-            (p as { functionResponse?: { response?: unknown; response_data?: unknown } })
-              .functionResponse;
+          const fr = p.function_response ?? p.functionResponse;
           if (fr && !widget) {
-            const response = (fr as any).response ?? (fr as any).response_data;
+            const response = fr.response ?? fr.response_data;
             const candidate = extractWidgetCandidate(response);
             if (candidate) {
               widget = candidate;

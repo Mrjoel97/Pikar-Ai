@@ -19,7 +19,7 @@
  * updates after the initial mount.
  */
 
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { render, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -136,16 +136,22 @@ function TestConsumer({ sessionId }: { sessionId: string }) {
 
   const { isLoadingHistory } = useAgentChat({ initialSessionId: sessionId });
 
-  handle = {
-    isLoadingHistory,
-    triggerUnrelatedSessionUpdate: () => {
-      const otherId = 'unrelated-session-xyz';
-      addActiveSession(otherId, { messages: [] });
-      updateSessionState(otherId, {
-        messages: [{ id: 'msg-1', role: 'agent', text: 'hello from other session' }],
-      });
-    },
-  };
+  useEffect(() => {
+    handle = {
+      isLoadingHistory,
+      triggerUnrelatedSessionUpdate: () => {
+        const otherId = 'unrelated-session-xyz';
+        addActiveSession(otherId, { messages: [] });
+        updateSessionState(otherId, {
+          messages: [{ id: 'msg-1', role: 'agent', text: 'hello from other session' }],
+        });
+      },
+    };
+
+    return () => {
+      handle = null;
+    };
+  }, [addActiveSession, isLoadingHistory, updateSessionState]);
 
   return <div data-testid="status">{isLoadingHistory ? 'loading' : 'ready'}</div>;
 }
@@ -155,16 +161,22 @@ function VisibleSessionConsumer() {
 
   const { isLoadingHistory } = useAgentChat();
 
-  handle = {
-    isLoadingHistory,
-    triggerUnrelatedSessionUpdate: () => {
-      const otherId = 'unrelated-session-xyz';
-      addActiveSession(otherId, { messages: [] });
-      updateSessionState(otherId, {
-        messages: [{ id: 'msg-1', role: 'agent', text: 'hello from other session' }],
-      });
-    },
-  };
+  useEffect(() => {
+    handle = {
+      isLoadingHistory,
+      triggerUnrelatedSessionUpdate: () => {
+        const otherId = 'unrelated-session-xyz';
+        addActiveSession(otherId, { messages: [] });
+        updateSessionState(otherId, {
+          messages: [{ id: 'msg-1', role: 'agent', text: 'hello from other session' }],
+        });
+      },
+    };
+
+    return () => {
+      handle = null;
+    };
+  }, [addActiveSession, isLoadingHistory, updateSessionState]);
 
   return <div data-testid="status">{isLoadingHistory ? 'loading' : 'ready'}</div>;
 }
@@ -175,7 +187,8 @@ function FreshSessionHarness({ sessionId }: { sessionId: string }) {
 
   useLayoutEffect(() => {
     addActiveSession(sessionId, { skipHistoryRestore: true, messages: [] });
-    setSeeded(true);
+    const timeoutId = window.setTimeout(() => setSeeded(true), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [addActiveSession, sessionId]);
 
   if (!seeded) {
