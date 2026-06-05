@@ -260,21 +260,23 @@ def test_after_tool_callback_persists_save_user_context_to_structured_memory():
             ctx,
             {
                 "_context_memory_save": True,
-                "key": "company_name",
+                "key": "preferred_tone",
                 "value": "Pikar AI",
             },
         )
 
     assert result == {
         "status": "saved",
-        "message": "Remembered: company_name = Pikar AI",
+        "message": "Remembered: preferred_tone = Pikar AI",
         "total_facts": 1,
     }
-    assert ctx.state["user_context"] == {"company_name": "Pikar AI"}
+    assert ctx.state["user_context"] == {"preferred_tone": "Pikar AI"}
     assert "_structured_memory_loaded::FinancialAnalysisAgent" not in ctx.state
     payload = upsert.call_args.args[0]
     assert payload["user_id"] == "11111111-1111-1111-1111-111111111111"
-    assert payload["key"] == "company_name"
+    assert payload["key"] == "preferred_tone"
+    assert payload["memory_type"] == "preference"
+    assert payload["scope"] == "global"
     assert payload["value_json"] == "Pikar AI"
     assert payload["source_kind"] == "tool"
     assert payload["source_ref"] == "save_user_context"

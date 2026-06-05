@@ -30,6 +30,7 @@ from app.services.context_engine import (
     ContextEngine,
     ContextPacket,
     StructuredMemoryFact,
+    infer_user_memory_fact_write_policy,
     load_structured_memory_facts_sync,
     normalize_user_memory_fact_payload,
     upsert_user_memory_fact_sync,
@@ -501,12 +502,17 @@ def _try_persist_structured_user_memory(
     if not user_id or not key:
         return False
 
+    policy = infer_user_memory_fact_write_policy(
+        key,
+        agent_name=_get_callback_agent_name(tool_context) or None,
+    )
     payload = normalize_user_memory_fact_payload(
         user_id=user_id,
         key=key,
         value=value,
-        memory_type="fact",
-        scope="global",
+        memory_type=policy["memory_type"],
+        scope=policy["scope"],
+        agent_id=policy["agent_id"],
         confidence=0.95,
         source_kind="tool",
         source_ref="save_user_context",

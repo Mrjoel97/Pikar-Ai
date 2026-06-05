@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.services.context_engine.writer import (
+    infer_user_memory_fact_write_policy,
     normalize_user_memory_fact_payload,
     upsert_user_memory_fact,
     upsert_user_memory_fact_sync,
@@ -103,6 +104,52 @@ def test_normalize_user_memory_fact_payload_no_ops_missing_user_or_key() -> None
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    ("key", "expected_type"),
+    [
+        ("company_name", "fact"),
+        ("preferred_tone", "preference"),
+        ("business_goal", "goal"),
+        ("budget_constraint", "constraint"),
+        ("compliance_requirement", "constraint"),
+    ],
+)
+def test_infer_user_memory_fact_write_policy_classifies_memory_type(
+    key: str,
+    expected_type: str,
+) -> None:
+    policy = infer_user_memory_fact_write_policy(key)
+
+    assert policy == {
+        "memory_type": expected_type,
+        "scope": "global",
+        "agent_id": "",
+    }
+
+
+def test_infer_user_memory_fact_write_policy_supports_agent_scope_prefix() -> None:
+    policy = infer_user_memory_fact_write_policy(
+        "agent:preferred_report_format",
+        agent_name="FinancialAnalysisAgent",
+    )
+
+    assert policy == {
+        "memory_type": "preference",
+        "scope": "agent",
+        "agent_id": "FinancialAnalysisAgent",
+    }
+
+
+def test_infer_user_memory_fact_write_policy_keeps_ambiguous_agentless_key_global() -> None:
+    policy = infer_user_memory_fact_write_policy("agent:preferred_report_format")
+
+    assert policy == {
+        "memory_type": "preference",
+        "scope": "global",
+        "agent_id": "",
+    }
 
 
 class _FakeUserMemoryFactsTable:
