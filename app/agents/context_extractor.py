@@ -26,6 +26,7 @@ from typing import Any
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types as genai_types
 
+from app.services.context_engine import ContextEngine, ContextPacket
 from app.services.google_workspace_auth_service import (
     get_google_workspace_auth_service,
 )
@@ -40,6 +41,7 @@ EXECUTIVE_ROOT_AGENT_NAME = "ExecutiveAgent"
 _CROSS_SESSION_LOADED_KEY = "_cross_session_context_loaded"
 _BRAND_PROFILE_LOADED_KEY = "_brand_profile_loaded"
 _GOOGLE_WORKSPACE_LOADED_KEY = "_google_workspace_creds_loaded"
+_CONTEXT_ENGINE = ContextEngine()
 
 # Per-(session, agent) cache key prefix for agent_memory injection. We cache
 # the loaded facts in session state so we hit Supabase at most once per agent
@@ -1227,21 +1229,38 @@ def context_memory_before_model_callback(
                     if hasattr(part, "text") and part.text
                 )
 
-        instruction_blocks: list[str] = []
+        context_packet = ContextPacket()
         # Handoff packet must come first so the receiving specialist sees
         # explicit intent/evidence/constraints before any user_context, brand,
         # or memory blocks. Defensive — empty string is ignored downstream.
         if handoff_block:
-            instruction_blocks.append("\n\n" + handoff_block + "\n")
+            context_packet.add(
+                "handoff_packet",
+                "\n\n" + handoff_block + "\n",
+                priority=10,
+                source="handoff_packet",
+            )
         if personalization_block:
-            instruction_blocks.append(personalization_block)
+            context_packet.add(
+                "personalization",
+                personalization_block,
+                priority=20,
+                source="user_agent_personalization",
+            )
         if brand_dna_block:
-            instruction_blocks.append(brand_dna_block)
+            context_packet.add(
+                "brand_dna",
+                brand_dna_block,
+                priority=30,
+                source="brand_profile",
+            )
         if agent_memory_block:
-            # Inject per-agent persistent memory immediately after user_context,
-            # so the agent sees its own remembered facts before cross-agent
-            # signals or session action history.
-            instruction_blocks.append(agent_memory_block)
+            context_packet.add(
+                "agent_memory",
+                agent_memory_block,
+                priority=40,
+                source="agent_memory",
+            )
         if ctx_summary:
             context_block = f"\n\n[REMEMBERED USER CONTEXT - use this instead of re-asking]\n{ctx_summary}\n[END REMEMBERED CONTEXT]\n"
             # --- Cross-agent context enrichment ---
@@ -1258,20 +1277,35 @@ def context_memory_before_model_callback(
                     context_block += action_ctx
             except Exception:
                 pass  # Never blocks
-            instruction_blocks.append(context_block)
+            context_packet.add(
+                "remembered_context",
+                context_block,
+                priority=50,
+                source="session_state",
+            )
         else:
             # Still inject cross-agent context even when there's no user context summary
             try:
                 cross_agent_ctx = _build_cross_agent_context(callback_context)
                 if cross_agent_ctx:
-                    instruction_blocks.append(cross_agent_ctx)
+                    context_packet.add(
+                        "cross_agent_context",
+                        cross_agent_ctx,
+                        priority=60,
+                        source="session_state",
+                    )
             except Exception:
                 pass  # Cross-agent context is optional, never blocks
             # --- Session action log ---
             try:
                 action_ctx = _build_session_action_context(callback_context)
                 if action_ctx:
-                    instruction_blocks.append(action_ctx)
+                    context_packet.add(
+                        "session_action_log",
+                        action_ctx,
+                        priority=70,
+                        source="session_state",
+                    )
             except Exception:
                 pass  # Never blocks
 
@@ -1279,20 +1313,13 @@ def context_memory_before_model_callback(
         if root_instruction_override and _should_apply_root_instruction_override(
             callback_context
         ):
-            llm_request.config.system_instruction = root_instruction_override + "".join(
-                block for block in instruction_blocks if block.strip()
-            )
-            return None
+            context_packet.root_instruction_override = root_instruction_override
 
-        if existing_si:
-            additions = [
-                block
-                for block in instruction_blocks
-                if block.strip() and block.strip() not in existing_si
-            ]
-            if additions:
-                llm_request.config.system_instruction = existing_si + "".join(additions)
-        elif instruction_blocks:
-            llm_request.config.system_instruction = "".join(instruction_blocks).strip()
+        rendered_instruction = _CONTEXT_ENGINE.apply_to_system_instruction(
+            existing_instruction=existing_si,
+            packet=context_packet,
+        )
+        if rendered_instruction is not None:
+            llm_request.config.system_instruction = rendered_instruction
 
     return None
