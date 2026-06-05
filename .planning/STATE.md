@@ -350,7 +350,7 @@ See: .planning/PROJECT.md (updated 2026-05-08)
 Milestone: v12.0 Agent System Quality Upgrade — STARTED 2026-05-08, ROADMAP COMPLETE 2026-05-08
 Phase: 95 of 100 (Phase A — Bug-Fix Sprint) — pending plan
 Status: v12.0 roadmap written. 6 phases (95-100) declared with goals + observable success criteria + 1:1 REQ-ID mappings + dependency chain. Coverage 100% (44/44 v12.0 requirements). v11.0 (App Builder Beta, phases 90-94) marked DEFERRED to v14.0 in ROADMAP — plans never written, scope preserved verbatim. **v13.0 (Authentication & Connections Hardening, phases 101-108) ROADMAP DEFINED 2026-05-08** — 8 phases with formal Goals, Requirements, and 2-5 observable Success Criteria each; 22/22 REQ-IDs mapped (AUTH-01..05 → 101, WORKSPACE-01..06 → 102, POST-01..03 → 103, POST-04..06 → 104, POST-07 → 105, POST-08 → 106, POST-09 → 107, HYGIENE-01..04 → 108); sequencing 101 → 102/103 → 104-107 (parallel) → 108. Ready to break down Phase 95 via /gsd:plan-phase 95.
-Last activity: 2026-05-08 — v13.0 ROADMAP written. Inserted as a `<details><summary>📋 v13.0 Authentication & Connections Hardening (Phases 101-108) — QUEUED 2026-05-08</summary>` block after the v12.0 section. Each phase includes Goal, Requirements (REQ-IDs), Success Criteria (observable user behaviors / testable code states), Depends on, Provenance: 2026-05-08 audit, Plans: 0 plans (TBD). Top-level Milestones list updated: v11.0 status changed to "DEFERRED to v14.0", v13.0 added as 📋 queued. v11.0 phase rows in progress table updated from "Deferred to v13.0" → "Deferred to v14.0". Progress table appended with rows 101-108. REQUIREMENTS.md v13.0 traceability table populated with all 22 REQ-ID → Phase mappings (status: Pending). v11.0 BETA-* traceability rows preserved unchanged per instruction (do NOT touch v10.0/v11.0/v12.0 traceability sections); BETA-* coverage summary updated to "Deferred to v14.0".
+Last activity: 2026-06-05 — Completed quick task 001: Context Engine Read-Side Foundation. Added app/services/context_engine typed ContextPacket/ContextBlock/ContextEngine, wired context_memory_before_model_callback through it, and verified ordering/dedupe/root override behavior with focused tests (13 passed). Code commit: 1e2da826.
 
 Progress: [░░░░░░░░░░] 0% (v12.0 roadmap done, first phase plan pending; v13.0 roadmap defined, awaiting v12.0 completion)
 
@@ -504,6 +504,12 @@ None yet.
 - PERF-01 (~20 files): largest single item in milestone; plan-phase should split into 2 plans by file batch
 - ARCH-04 (OpenAPI codegen): requires CI pipeline changes — may need coordination with existing GitHub Actions setup
 - Pre-existing failure in frontend/src/components/chat/ChatInterface.test.tsx — 4 tests crash with "useSessionControl must be used within a SessionControlProvider" due to ChatInterface.tsx adding 11 module-scope hooks after the test was written. Plan 01 cannot fix this (vi.mock is per-file). Documented in .planning/phases/83-document-upload-bypass/deferred-items.md; Plan 02 will adopt the harness inside ChatInterface.test.tsx to resolve.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 001 | Context Engine Read-Side Foundation | 2026-06-05 | 1e2da826 | Verified | [001-context-engine-read-side](./quick/001-context-engine-read-side/) |
 
 ## Session Continuity
 
