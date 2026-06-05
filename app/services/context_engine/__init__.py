@@ -4,6 +4,22 @@
 """Context assembly primitives for agent prompt injection."""
 
 from app.services.context_engine.engine import ContextEngine
+from app.services.context_engine.loaders import (
+    StructuredMemoryFact,
+    load_structured_memory_facts,
+)
 from app.services.context_engine.models import ContextBlock, ContextPacket
+from app.services.context_engine.writer import (
+    normalize_user_memory_fact_payload,
+    upsert_user_memory_fact,
+)
 
-__all__ = ["ContextBlock", "ContextEngine", "ContextPacket"]
+__all__ = [
+    "ContextBlock",
+    "ContextEngine",
+    "ContextPacket",
+    "StructuredMemoryFact",
+    "load_structured_memory_facts",
+    "normalize_user_memory_fact_payload",
+    "upsert_user_memory_fact",
+]
