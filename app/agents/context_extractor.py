@@ -26,7 +26,12 @@ from typing import Any
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types as genai_types
 
-from app.services.context_engine import ContextEngine, ContextPacket
+from app.services.context_engine import (
+    ContextEngine,
+    ContextPacket,
+    StructuredMemoryFact,
+    load_structured_memory_facts_sync,
+)
 from app.services.google_workspace_auth_service import (
     get_google_workspace_auth_service,
 )
@@ -47,11 +52,7 @@ _CONTEXT_ENGINE = ContextEngine()
 # the loaded facts in session state so we hit Supabase at most once per agent
 # per session for this read.
 _AGENT_MEMORY_CACHE_PREFIX = "_agent_memory_loaded::"
-
-# Per-(session, agent) cache key prefix for agent_memory injection. We cache
-# the loaded facts in session state so we hit Supabase at most once per agent
-# per session for this read.
-_AGENT_MEMORY_CACHE_PREFIX = "_agent_memory_loaded::"
+_STRUCTURED_MEMORY_CACHE_PREFIX = "_structured_memory_loaded::"
 
 # Agents that receive Brand DNA injection
 _CREATIVE_AGENT_NAMES = {
@@ -397,56 +398,88 @@ def _try_load_google_workspace_credentials(
 # =============================================================================
 
 
-def _try_load_agent_memory(callback_context: CallbackContext) -> str:
-    """Load this agent's persistent memory row and format it as an injection block.
+def _format_structured_memory_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(value)
 
-    Reads ``public.agent_memory`` keyed by (user_id, agent_name). Result is
-    cached in session state so we hit Supabase at most once per agent per
-    session. Returns a formatted prompt block, or empty string if there are
-    no facts (or any read error — best-effort).
-    """
-    agent_name = _get_callback_agent_name(callback_context)
-    user_id = _get_callback_user_id(callback_context)
-    if not agent_name or not user_id:
+
+def _format_structured_memory_facts(
+    facts: list[StructuredMemoryFact],
+    *,
+    agent_name: str,
+) -> str:
+    if not facts:
         return ""
 
-    cache_key = f"{_AGENT_MEMORY_CACHE_PREFIX}{agent_name}"
+    lines = [
+        f"\n[STRUCTURED USER MEMORY — durable facts for {agent_name or 'this agent'}]",
+        (
+            "Use these durable facts as the canonical remembered user profile unless "
+            "the current conversation clearly updates them."
+        ),
+    ]
+    for fact in facts:
+        key = str(fact.key or "").strip()
+        if not key:
+            continue
+        scope = str(fact.scope or "global").strip()
+        memory_type = str(fact.memory_type or "fact").strip()
+        value = _format_structured_memory_value(fact.value_json)
+        metadata = f"{memory_type}; scope={scope}"
+        if fact.confidence is not None:
+            metadata += f"; confidence={fact.confidence}"
+        lines.append(f"- {key} ({metadata}): {value}")
+
+    if len(lines) == 2:
+        return ""
+
+    lines.append("[END STRUCTURED USER MEMORY]\n")
+    return "\n".join(lines)
+
+
+def _try_load_structured_user_memory(callback_context: CallbackContext) -> str:
+    """Load durable structured user facts and format them for prompt injection."""
+    agent_name = _get_callback_agent_name(callback_context)
+    user_id = _get_callback_user_id(callback_context)
+    if not user_id:
+        return ""
+
+    cache_key = f"{_STRUCTURED_MEMORY_CACHE_PREFIX}{agent_name or '*'}"
     cached = callback_context.state.get(cache_key)
     if cached is not None:
-        # Cached as either a non-empty formatted block or empty string sentinel.
         return cached if isinstance(cached, str) else ""
 
     try:
-        from app.services.agent_memory import get_agent_memory_sync
-
-        facts = get_agent_memory_sync(user_id, agent_name)
+        facts = load_structured_memory_facts_sync(
+            user_id,
+            agent_name=agent_name or None,
+        )
     except Exception as exc:
-        logger.debug("[AgentMemory] load skipped for %s: %s", agent_name, exc)
+        logger.debug(
+            "[ContextEngine] structured memory load skipped for %s: %s",
+            agent_name,
+            exc,
+        )
         callback_context.state[cache_key] = ""
         return ""
 
-    if not facts:
-        callback_context.state[cache_key] = ""
-        return ""
-
-    block = (
-        f"\n[AGENT MEMORY — {agent_name} — what you previously remembered about this user]\n"
-        f"Previously remembered facts about this user: {json.dumps(facts, indent=2, default=str)}\n"
-        f"[END AGENT MEMORY]\n"
-    )
+    block = _format_structured_memory_facts(facts, agent_name=agent_name)
     callback_context.state[cache_key] = block
-    logger.info(
-        "[AgentMemory] Injected %d fact(s) for agent=%s user=%s",
-        len(facts),
-        agent_name,
-        user_id,
-    )
+    if block:
+        logger.info(
+            (
+                "[ContextEngine] Injected %d structured memory fact(s) "
+                "for agent=%s user=%s"
+            ),
+            len(facts),
+            agent_name,
+            user_id,
+        )
     return block
-
-
-# =============================================================================
-# Per-Agent Persistent Memory Injection
-# =============================================================================
 
 
 def _try_load_agent_memory(callback_context: CallbackContext) -> str:
@@ -1176,6 +1209,13 @@ def context_memory_before_model_callback(
     except Exception:
         pass  # Brand DNA is optional, never blocks
 
+    # --- Durable structured user memory injection ---
+    structured_memory_block = ""
+    try:
+        structured_memory_block = _try_load_structured_user_memory(callback_context)
+    except Exception:
+        pass  # Structured memory is best-effort, never blocks
+
     # --- Per-agent persistent memory injection ---
     agent_memory_block = ""
     try:
@@ -1204,6 +1244,7 @@ def context_memory_before_model_callback(
         not ctx
         and not personalization_block
         and not brand_dna_block
+        and not structured_memory_block
         and not agent_memory_block
         and not handoff_block
         and not has_cross_agent
@@ -1253,6 +1294,13 @@ def context_memory_before_model_callback(
                 brand_dna_block,
                 priority=30,
                 source="brand_profile",
+            )
+        if structured_memory_block:
+            context_packet.add(
+                "structured_user_memory",
+                structured_memory_block,
+                priority=35,
+                source="user_memory_facts",
             )
         if agent_memory_block:
             context_packet.add(

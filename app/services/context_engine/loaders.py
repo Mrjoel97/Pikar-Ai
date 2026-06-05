@@ -109,4 +109,49 @@ async def load_structured_memory_facts(
         return []
 
 
-__all__ = ["StructuredMemoryFact", "load_structured_memory_facts"]
+def load_structured_memory_facts_sync(
+    user_id: str | None,
+    *,
+    agent_name: str | None = None,
+    limit: int = _DEFAULT_FACT_LIMIT,
+) -> list[StructuredMemoryFact]:
+    """Sync variant for ADK callbacks that cannot await async loaders."""
+    if not _is_valid_user_id(user_id):
+        return []
+
+    safe_limit = max(1, int(limit or _DEFAULT_FACT_LIMIT))
+
+    try:
+        from app.services.supabase_client import get_service_client
+
+        client = get_service_client()
+        if not client:
+            return []
+        response = (
+            client.table(_USER_MEMORY_FACTS_TABLE)
+            .select(_FACT_COLUMNS)
+            .eq("user_id", str(user_id))
+            .or_(_scope_filter(agent_name))
+            .limit(safe_limit)
+            .execute()
+        )
+        rows = getattr(response, "data", None) or []
+        return [_map_fact(row) for row in rows if isinstance(row, dict)]
+    except Exception as exc:  # pragma: no cover - best-effort guard
+        logger.debug(
+            (
+                "[ContextEngine] load_structured_memory_facts_sync"
+                "(user=%s, agent=%s) failed: %s"
+            ),
+            user_id,
+            agent_name,
+            exc,
+        )
+        return []
+
+
+__all__ = [
+    "StructuredMemoryFact",
+    "load_structured_memory_facts",
+    "load_structured_memory_facts_sync",
+]

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.context_engine.loaders import (
     StructuredMemoryFact,
     load_structured_memory_facts,
+    load_structured_memory_facts_sync,
 )
 
 
@@ -52,6 +53,35 @@ class FakeMemoryFactsClient:
     def table(self, name: str):
         self.tables.append(name)
         return self.query
+
+
+class FakeSyncMemoryFactsQuery:
+    def __init__(self, rows=None, *, exc: Exception | None = None):
+        self.rows = rows or []
+        self.exc = exc
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    def select(self, *args, **kwargs):
+        self.calls.append(("select", args, kwargs))
+        return self
+
+    def eq(self, *args, **kwargs):
+        self.calls.append(("eq", args, kwargs))
+        return self
+
+    def or_(self, *args, **kwargs):
+        self.calls.append(("or_", args, kwargs))
+        return self
+
+    def limit(self, *args, **kwargs):
+        self.calls.append(("limit", args, kwargs))
+        return self
+
+    def execute(self):
+        self.calls.append(("execute", (), {}))
+        if self.exc:
+            raise self.exc
+        return SimpleNamespace(data=self.rows)
 
 
 @pytest.mark.asyncio
@@ -139,3 +169,51 @@ async def test_load_structured_memory_facts_returns_empty_on_database_failure():
 
     with patch.dict(sys.modules, {"app.services.supabase_client": supabase_module}):
         assert await load_structured_memory_facts(VALID_USER_ID) == []
+
+
+def test_load_structured_memory_facts_sync_maps_rows():
+    rows = [
+        {
+            "key": "preferred_currency",
+            "value_json": "USD",
+            "memory_type": "preference",
+            "scope": "agent",
+            "agent_id": "FinancialAnalysisAgent",
+        }
+    ]
+    query = FakeSyncMemoryFactsQuery(rows)
+    client = FakeMemoryFactsClient(query)
+    supabase_module = SimpleNamespace(get_service_client=lambda: client)
+
+    with patch.dict(sys.modules, {"app.services.supabase_client": supabase_module}):
+        facts = load_structured_memory_facts_sync(
+            VALID_USER_ID,
+            agent_name="FinancialAnalysisAgent",
+        )
+
+    assert facts == [
+        StructuredMemoryFact(
+            key="preferred_currency",
+            value_json="USD",
+            memory_type="preference",
+            scope="agent",
+            agent_id="FinancialAnalysisAgent",
+        )
+    ]
+    assert client.tables == ["user_memory_facts"]
+    assert (
+        "or_",
+        (
+            'scope.eq.global,and(scope.eq.agent,agent_id.eq."FinancialAnalysisAgent")',
+        ),
+        {},
+    ) in query.calls
+
+
+def test_load_structured_memory_facts_sync_returns_empty_for_invalid_user_id():
+    supabase_module = SimpleNamespace(get_service_client=MagicMock())
+
+    with patch.dict(sys.modules, {"app.services.supabase_client": supabase_module}):
+        assert load_structured_memory_facts_sync("not-a-uuid") == []
+
+    supabase_module.get_service_client.assert_not_called()

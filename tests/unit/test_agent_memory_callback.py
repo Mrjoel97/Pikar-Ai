@@ -156,3 +156,80 @@ def test_before_model_callback_extends_system_instruction_with_agent_memory():
     assert "[AGENT MEMORY" in si
     assert "preferred_currency" in si
     assert json.dumps(canned_facts, indent=2)[:20] in si or "USD" in si
+
+
+def test_try_load_structured_user_memory_formats_and_caches():
+    from app.agents import context_extractor
+    from app.services.context_engine import StructuredMemoryFact
+
+    ctx = _make_callback_context(
+        "11111111-1111-1111-1111-111111111111",
+        "FinancialAnalysisAgent",
+    )
+    facts = [
+        StructuredMemoryFact(
+            key="preferred_currency",
+            value_json={"code": "USD"},
+            memory_type="preference",
+            scope="global",
+            confidence=0.95,
+        )
+    ]
+
+    with patch.object(
+        context_extractor,
+        "load_structured_memory_facts_sync",
+        return_value=facts,
+    ) as mocked:
+        first = context_extractor._try_load_structured_user_memory(ctx)
+        second = context_extractor._try_load_structured_user_memory(ctx)
+
+    assert first == second
+    assert "[STRUCTURED USER MEMORY" in first
+    assert "preferred_currency" in first
+    assert '"code": "USD"' in first
+    assert mocked.call_count == 1
+    cache_keys = [k for k in ctx.state if k.startswith("_structured_memory_loaded::")]
+    assert cache_keys
+
+
+def test_before_model_callback_injects_structured_memory_before_legacy_agent_memory():
+    from app.agents import context_extractor
+    from app.services.context_engine import StructuredMemoryFact
+
+    ctx = _make_callback_context(
+        "11111111-1111-1111-1111-111111111111",
+        "FinancialAnalysisAgent",
+    )
+    request = _make_llm_request_with_user_text("hello")
+
+    structured_facts = [
+        StructuredMemoryFact(
+            key="preferred_currency",
+            value_json="USD",
+            memory_type="preference",
+            scope="global",
+        )
+    ]
+
+    with (
+        patch.object(context_extractor, "_try_load_cross_session_context"),
+        patch.object(context_extractor, "_try_load_brand_profile", return_value=""),
+        patch.object(
+            context_extractor,
+            "load_structured_memory_facts_sync",
+            return_value=structured_facts,
+        ),
+        patch(
+            "app.services.agent_memory.get_agent_memory_sync",
+            return_value={"legacy_fact": True},
+        ),
+    ):
+        result = context_extractor.context_memory_before_model_callback(ctx, request)
+
+    assert result is None
+    si = request.config.system_instruction
+    assert isinstance(si, str)
+    assert "[STRUCTURED USER MEMORY" in si
+    assert "[AGENT MEMORY" in si
+    assert si.index("[STRUCTURED USER MEMORY") < si.index("[AGENT MEMORY")
