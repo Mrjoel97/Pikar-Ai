@@ -10,6 +10,7 @@ import pytest
 from app.services.context_engine.writer import (
     normalize_user_memory_fact_payload,
     upsert_user_memory_fact,
+    upsert_user_memory_fact_sync,
 )
 
 
@@ -124,6 +125,12 @@ class _FakeUserMemoryFactsTable:
         return object()
 
 
+class _FakeSyncUserMemoryFactsTable(_FakeUserMemoryFactsTable):
+    def execute(self) -> object:
+        self.executed = True
+        return object()
+
+
 class _FakeSupabaseClient:
     def __init__(self, table: _FakeUserMemoryFactsTable) -> None:
         self.table_name: str | None = None
@@ -179,6 +186,62 @@ async def test_upsert_user_memory_fact_swallows_db_errors(
 
     assert (
         await upsert_user_memory_fact(
+            {
+                "user_id": "user-123",
+                "scope": "global",
+                "agent_id": "",
+                "memory_type": "fact",
+                "key": "company_name",
+                "value_json": "Pikar AI",
+                "confidence": 0.9,
+                "source_kind": "conversation",
+                "source_ref": None,
+            }
+        )
+        is False
+    )
+
+
+def test_upsert_user_memory_fact_sync_uses_expected_conflict_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    table = _FakeSyncUserMemoryFactsTable()
+    client = _FakeSupabaseClient(table)
+
+    from app.services import supabase_client
+
+    monkeypatch.setattr(supabase_client, "get_service_client", lambda: client)
+
+    payload = normalize_user_memory_fact_payload(
+        user_id="user-123",
+        key="company_name",
+        value="Pikar AI",
+    )
+
+    assert upsert_user_memory_fact_sync(payload) is True
+    assert client.table_name == "user_memory_facts"
+    assert table.payload == payload
+    assert table.on_conflict == "user_id,scope,agent_id,key"
+    assert table.executed is True
+
+
+def test_upsert_user_memory_fact_sync_no_ops_invalid_payload() -> None:
+    assert upsert_user_memory_fact_sync(None) is False
+
+
+def test_upsert_user_memory_fact_sync_swallows_db_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import supabase_client
+
+    monkeypatch.setattr(
+        supabase_client,
+        "get_service_client",
+        lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+    )
+
+    assert (
+        upsert_user_memory_fact_sync(
             {
                 "user_id": "user-123",
                 "scope": "global",

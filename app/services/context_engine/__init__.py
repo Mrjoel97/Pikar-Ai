@@ -13,6 +13,7 @@ from app.services.context_engine.models import ContextBlock, ContextPacket
 from app.services.context_engine.writer import (
     normalize_user_memory_fact_payload,
     upsert_user_memory_fact,
+    upsert_user_memory_fact_sync,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "load_structured_memory_facts_sync",
     "normalize_user_memory_fact_payload",
     "upsert_user_memory_fact",
+    "upsert_user_memory_fact_sync",
 ]

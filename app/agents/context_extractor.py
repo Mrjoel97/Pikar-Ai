@@ -31,6 +31,8 @@ from app.services.context_engine import (
     ContextPacket,
     StructuredMemoryFact,
     load_structured_memory_facts_sync,
+    normalize_user_memory_fact_payload,
+    upsert_user_memory_fact_sync,
 )
 from app.services.google_workspace_auth_service import (
     get_google_workspace_auth_service,
@@ -480,6 +482,39 @@ def _try_load_structured_user_memory(callback_context: CallbackContext) -> str:
             user_id,
         )
     return block
+
+
+def _clear_structured_memory_cache(callback_context: CallbackContext) -> None:
+    for key in list(callback_context.state.keys()):
+        if str(key).startswith(_STRUCTURED_MEMORY_CACHE_PREFIX):
+            callback_context.state.pop(key, None)
+
+
+def _try_persist_structured_user_memory(
+    tool_context: CallbackContext,
+    *,
+    key: str,
+    value: Any,
+) -> bool:
+    """Best-effort durable write for facts saved through save_user_context."""
+    user_id = _get_callback_user_id(tool_context)
+    if not user_id or not key:
+        return False
+
+    payload = normalize_user_memory_fact_payload(
+        user_id=user_id,
+        key=key,
+        value=value,
+        memory_type="fact",
+        scope="global",
+        confidence=0.95,
+        source_kind="tool",
+        source_ref="save_user_context",
+    )
+    saved = upsert_user_memory_fact_sync(payload)
+    if saved:
+        _clear_structured_memory_cache(tool_context)
+    return saved
 
 
 def _try_load_agent_memory(callback_context: CallbackContext) -> str:
@@ -1076,6 +1111,14 @@ def context_memory_after_tool_callback(
             current_ctx = _get_user_context_dict(tool_context)
             current_ctx[key] = value
             tool_context.state[USER_CONTEXT_STATE_KEY] = current_ctx
+            try:
+                _try_persist_structured_user_memory(
+                    tool_context,
+                    key=str(key),
+                    value=value,
+                )
+            except Exception:
+                pass  # Durable memory writes are best-effort, never block.
             logger.info("[ContextMemory] Saved: %s = %s", key, value)
             return {
                 "status": "saved",

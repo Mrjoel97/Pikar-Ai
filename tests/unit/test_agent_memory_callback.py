@@ -233,3 +233,82 @@ def test_before_model_callback_injects_structured_memory_before_legacy_agent_mem
     assert "[STRUCTURED USER MEMORY" in si
     assert "[AGENT MEMORY" in si
     assert si.index("[STRUCTURED USER MEMORY") < si.index("[AGENT MEMORY")
+
+
+def test_after_tool_callback_persists_save_user_context_to_structured_memory():
+    from app.agents import context_extractor
+
+    ctx = _make_callback_context(
+        "11111111-1111-1111-1111-111111111111",
+        "FinancialAnalysisAgent",
+    )
+    ctx.state["_structured_memory_loaded::FinancialAnalysisAgent"] = "stale"
+    tool = MagicMock()
+    tool.__name__ = "save_user_context"
+
+    with (
+        patch.object(context_extractor, "tool_progress_after_tool_callback"),
+        patch.object(
+            context_extractor,
+            "upsert_user_memory_fact_sync",
+            return_value=True,
+        ) as upsert,
+    ):
+        result = context_extractor.context_memory_after_tool_callback(
+            tool,
+            {},
+            ctx,
+            {
+                "_context_memory_save": True,
+                "key": "company_name",
+                "value": "Pikar AI",
+            },
+        )
+
+    assert result == {
+        "status": "saved",
+        "message": "Remembered: company_name = Pikar AI",
+        "total_facts": 1,
+    }
+    assert ctx.state["user_context"] == {"company_name": "Pikar AI"}
+    assert "_structured_memory_loaded::FinancialAnalysisAgent" not in ctx.state
+    payload = upsert.call_args.args[0]
+    assert payload["user_id"] == "11111111-1111-1111-1111-111111111111"
+    assert payload["key"] == "company_name"
+    assert payload["value_json"] == "Pikar AI"
+    assert payload["source_kind"] == "tool"
+    assert payload["source_ref"] == "save_user_context"
+
+
+def test_after_tool_callback_keeps_session_save_when_structured_memory_fails():
+    from app.agents import context_extractor
+
+    ctx = _make_callback_context("user-abc", "FinancialAnalysisAgent")
+    tool = MagicMock()
+    tool.__name__ = "save_user_context"
+
+    with (
+        patch.object(context_extractor, "tool_progress_after_tool_callback"),
+        patch.object(
+            context_extractor,
+            "upsert_user_memory_fact_sync",
+            side_effect=RuntimeError("boom"),
+        ),
+    ):
+        result = context_extractor.context_memory_after_tool_callback(
+            tool,
+            {},
+            ctx,
+            {
+                "_context_memory_save": True,
+                "key": "industry",
+                "value": "Manufacturing",
+            },
+        )
+
+    assert result == {
+        "status": "saved",
+        "message": "Remembered: industry = Manufacturing",
+        "total_facts": 1,
+    }
+    assert ctx.state["user_context"] == {"industry": "Manufacturing"}

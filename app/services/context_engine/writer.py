@@ -110,7 +110,29 @@ async def upsert_user_memory_fact(payload: dict[str, Any] | None) -> bool:
         return False
 
 
+def upsert_user_memory_fact_sync(payload: dict[str, Any] | None) -> bool:
+    """Sync variant for ADK callbacks that cannot await async writers."""
+    if not payload:
+        return False
+
+    try:
+        from app.services.supabase_client import get_service_client
+
+        client = get_service_client()
+        if not client:
+            return False
+        client.table(_TABLE).upsert(
+            payload,
+            on_conflict="user_id,scope,agent_id,key",
+        ).execute()
+        return True
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("[ContextWriter] upsert_user_memory_fact_sync failed: %s", exc)
+        return False
+
+
 __all__ = [
     "normalize_user_memory_fact_payload",
     "upsert_user_memory_fact",
+    "upsert_user_memory_fact_sync",
 ]
