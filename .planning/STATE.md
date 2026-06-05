@@ -350,7 +350,7 @@ See: .planning/PROJECT.md (updated 2026-05-08)
 Milestone: v12.0 Agent System Quality Upgrade — STARTED 2026-05-08, ROADMAP COMPLETE 2026-05-08
 Phase: 95 of 100 (Phase A — Bug-Fix Sprint) — pending plan
 Status: v12.0 roadmap written. 6 phases (95-100) declared with goals + observable success criteria + 1:1 REQ-ID mappings + dependency chain. Coverage 100% (44/44 v12.0 requirements). v11.0 (App Builder Beta, phases 90-94) marked DEFERRED to v14.0 in ROADMAP — plans never written, scope preserved verbatim. **v13.0 (Authentication & Connections Hardening, phases 101-108) ROADMAP DEFINED 2026-05-08** — 8 phases with formal Goals, Requirements, and 2-5 observable Success Criteria each; 22/22 REQ-IDs mapped (AUTH-01..05 → 101, WORKSPACE-01..06 → 102, POST-01..03 → 103, POST-04..06 → 104, POST-07 → 105, POST-08 → 106, POST-09 → 107, HYGIENE-01..04 → 108); sequencing 101 → 102/103 → 104-107 (parallel) → 108. Ready to break down Phase 95 via /gsd:plan-phase 95.
-Last activity: 2026-06-05 — Completed quick task 4: Context Engine Save User Context Persistence. `save_user_context` still updates session state and returns the same response, and now best-effort persists normalized global facts into durable user_memory_facts through the context-engine sync writer. Structured-memory prompt caches clear after successful durable writes. Verified writer/callback focus (21 passed), broader context/progress callback suite (42 passed), and compileall. Code commit: 64acb840.
+Last activity: 2026-06-05 — Completed quick task 5: Context Engine Saved Fact Policy. Added deterministic write policy for saved context facts, classifying durable writes as fact/preference/goal/constraint and supporting explicit agent-scope prefixes. `save_user_context` durable persistence now applies inferred policy before normalized upsert while preserving session-state behavior. Verified writer policy tests (18 passed), callback tests (10 passed), broader context/progress suite (49 passed), and compileall. Code commit: 6f2a7a3b.
 
 Progress: [░░░░░░░░░░] 0% (v12.0 roadmap done, first phase plan pending; v13.0 roadmap defined, awaiting v12.0 completion)
 
@@ -513,6 +513,7 @@ None yet.
 | 2 | Context Engine Durable Memory Slice | 2026-06-05 | a5253477 | Verified | [2-context-engine-durable-memory-slice](./quick/2-context-engine-durable-memory-slice/) |
 | 3 | Context Engine Runtime Structured Memory | 2026-06-05 | 2d41b4e5 | Verified | [3-context-engine-runtime-structured-memory](./quick/3-context-engine-runtime-structured-memory/) |
 | 4 | Context Engine Save User Context Persistence | 2026-06-05 | 64acb840 | Verified | [4-context-engine-save-user-context-persistence](./quick/4-context-engine-save-user-context-persistence/) |
+| 5 | Context Engine Saved Fact Policy | 2026-06-05 | 6f2a7a3b | Verified | [5-context-engine-saved-fact-policy](./quick/5-context-engine-saved-fact-policy/) |
 
 ## Session Continuity
 
