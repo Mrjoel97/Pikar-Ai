@@ -3,7 +3,7 @@ quick_task: 2
 title: Context Engine Durable Memory Slice
 date: 2026-06-05
 status: complete
-commit: pending
+commit: a5253477
 ---
 
 # Quick Task 2 Summary: Context Engine Durable Memory Slice
@@ -39,6 +39,10 @@ Added durable `user_memory_facts` read/write primitives to the context engine, w
 - `uv run pytest tests/unit/test_context_engine.py tests/unit/test_context_engine_loaders.py tests/unit/test_context_engine_writer.py` — 16 passed.
 - `uv run pytest tests/unit/test_context_engine.py tests/unit/test_context_engine_loaders.py tests/unit/test_context_engine_writer.py tests/unit/test_personalization_prompt_injection.py tests/unit/test_agent_memory_callback.py` — 25 passed.
 - `.venv\Scripts\python.exe -m compileall app\services\context_engine tests\unit\test_context_engine_loaders.py tests\unit\test_context_engine_writer.py` — passed.
+
+## Commit
+
+- `a5253477` — `feat(context-engine): add durable memory primitives`
 
 ## Notes
 

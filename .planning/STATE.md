@@ -350,7 +350,7 @@ See: .planning/PROJECT.md (updated 2026-05-08)
 Milestone: v12.0 Agent System Quality Upgrade — STARTED 2026-05-08, ROADMAP COMPLETE 2026-05-08
 Phase: 95 of 100 (Phase A — Bug-Fix Sprint) — pending plan
 Status: v12.0 roadmap written. 6 phases (95-100) declared with goals + observable success criteria + 1:1 REQ-ID mappings + dependency chain. Coverage 100% (44/44 v12.0 requirements). v11.0 (App Builder Beta, phases 90-94) marked DEFERRED to v14.0 in ROADMAP — plans never written, scope preserved verbatim. **v13.0 (Authentication & Connections Hardening, phases 101-108) ROADMAP DEFINED 2026-05-08** — 8 phases with formal Goals, Requirements, and 2-5 observable Success Criteria each; 22/22 REQ-IDs mapped (AUTH-01..05 → 101, WORKSPACE-01..06 → 102, POST-01..03 → 103, POST-04..06 → 104, POST-07 → 105, POST-08 → 106, POST-09 → 107, HYGIENE-01..04 → 108); sequencing 101 → 102/103 → 104-107 (parallel) → 108. Ready to break down Phase 95 via /gsd:plan-phase 95.
-Last activity: 2026-06-05 — Completed quick task 001: Context Engine Read-Side Foundation. Added app/services/context_engine typed ContextPacket/ContextBlock/ContextEngine, wired context_memory_before_model_callback through it, and verified ordering/dedupe/root override behavior with focused tests (13 passed). Code commit: 1e2da826.
+Last activity: 2026-06-05 — Completed quick task 2: Context Engine Durable Memory Slice. Added best-effort durable user_memory_facts loader/writer primitives under app/services/context_engine, verified loader/writer/context/callback smoke suites (25 passed). Code commit: a5253477.
 
 Progress: [░░░░░░░░░░] 0% (v12.0 roadmap done, first phase plan pending; v13.0 roadmap defined, awaiting v12.0 completion)
 
@@ -510,6 +510,7 @@ None yet.
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
 | 001 | Context Engine Read-Side Foundation | 2026-06-05 | 1e2da826 | Verified | [001-context-engine-read-side](./quick/001-context-engine-read-side/) |
+| 2 | Context Engine Durable Memory Slice | 2026-06-05 | a5253477 | Verified | [2-context-engine-durable-memory-slice](./quick/2-context-engine-durable-memory-slice/) |
 
 ## Session Continuity
 
