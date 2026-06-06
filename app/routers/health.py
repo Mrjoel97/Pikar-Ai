@@ -98,7 +98,7 @@ async def get_liveness():
 
 @router.get("/health/connections")
 async def get_connection_pool_health():
-    """Monitor Supabase connection pool stats and cache health."""
+    """Monitor Supabase, Redis, SSE, and outbound HTTP connection health."""
     required_env = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
     optional_critical_env = [
         "WORKFLOW_STRICT_TOOL_RESOLUTION",
@@ -113,6 +113,7 @@ async def get_connection_pool_health():
     try:
         from app.rag.knowledge_vault import get_rag_client_stats, get_supabase_client
         from app.services.cache import get_cache_service
+        from app.services.http_client import get_http_client_pool_stats
         from app.services.supabase import get_client_stats, get_service_client
         from app.services.supabase_async import execute_async
         from app.services.supabase_resilience import supabase_circuit_breaker
@@ -155,6 +156,7 @@ async def get_connection_pool_health():
             "circuit_breaker": cache_stats.get("circuit_breaker"),
             "transport": "async_redis",
         }
+        outbound_http_detail = get_http_client_pool_stats()
 
         supabase_cb = await supabase_circuit_breaker.get_status()
 
@@ -226,6 +228,7 @@ async def get_connection_pool_health():
                 "Creation counts should remain stable (1) after initialization."
             ),
             "cache": cache_detail,
+            "outbound_http": outbound_http_detail,
             "supabase_circuit_breaker": supabase_cb,
             "config_readiness": config_readiness,
             "workflow_rollout": workflow_rollout,

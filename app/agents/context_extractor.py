@@ -33,6 +33,7 @@ from app.services.context_engine import (
     infer_user_memory_fact_write_policy,
     load_structured_memory_facts_sync,
     normalize_user_memory_fact_payload,
+    select_structured_memory_facts_for_prompt,
     upsert_user_memory_fact_sync,
 )
 from app.services.google_workspace_auth_service import (
@@ -415,7 +416,11 @@ def _format_structured_memory_facts(
     *,
     agent_name: str,
 ) -> str:
-    if not facts:
+    selected_facts = select_structured_memory_facts_for_prompt(
+        facts,
+        agent_name=agent_name or None,
+    )
+    if not selected_facts:
         return ""
 
     lines = [
@@ -425,7 +430,7 @@ def _format_structured_memory_facts(
             "the current conversation clearly updates them."
         ),
     ]
-    for fact in facts:
+    for fact in selected_facts:
         key = str(fact.key or "").strip()
         if not key:
             continue
@@ -473,11 +478,18 @@ def _try_load_structured_user_memory(callback_context: CallbackContext) -> str:
     block = _format_structured_memory_facts(facts, agent_name=agent_name)
     callback_context.state[cache_key] = block
     if block:
+        selected_count = len(
+            select_structured_memory_facts_for_prompt(
+                facts,
+                agent_name=agent_name or None,
+            )
+        )
         logger.info(
             (
-                "[ContextEngine] Injected %d structured memory fact(s) "
+                "[ContextEngine] Injected %d/%d structured memory fact(s) "
                 "for agent=%s user=%s"
             ),
+            selected_count,
             len(facts),
             agent_name,
             user_id,

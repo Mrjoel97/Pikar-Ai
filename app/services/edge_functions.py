@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.app_utils.env import get_stripped_env
+from app.services.http_client import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -41,23 +42,26 @@ class EdgeFunctionClient:
         url = f"{self.supabase_url}/functions/v1/{function_name}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, json=payload, headers=self.headers)
+            client = get_http_client("edge_functions")
+            response = await client.post(
+                url,
+                json=payload,
+                headers=self.headers,
+                timeout=self.timeout,
+            )
 
-                if response.status_code >= 400:
-                    logger.error(
-                        f"Edge Function {function_name} failed: {response.text}"
-                    )
-                    # Attempt to parse error
-                    try:
-                        return {
-                            "error": response.json().get("error", response.text),
-                            "status": response.status_code,
-                        }
-                    except (ValueError, AttributeError):
-                        return {"error": response.text, "status": response.status_code}
+            if response.status_code >= 400:
+                logger.error(f"Edge Function {function_name} failed: {response.text}")
+                # Attempt to parse error
+                try:
+                    return {
+                        "error": response.json().get("error", response.text),
+                        "status": response.status_code,
+                    }
+                except (ValueError, AttributeError):
+                    return {"error": response.text, "status": response.status_code}
 
-                return response.json()
+            return response.json()
         except Exception as e:
             logger.error(f"Failed to invoke Edge Function {function_name}: {e}")
             return {"error": str(e)}

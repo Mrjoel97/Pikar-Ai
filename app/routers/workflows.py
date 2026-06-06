@@ -33,6 +33,8 @@ from app.services.sse_connection_limits import (
 from app.services.governance_service import get_governance_service
 from app.services.supabase import get_service_client
 from app.services.supabase_async import execute_async
+from app.skills.automation_templates import build_skill_automation_catalog
+from app.skills.registry import AgentID
 from app.workflows.contract_defaults import list_contract_safe_tool_names
 from app.workflows.engine import get_workflow_engine
 from app.workflows.event_bus import subscribe, unsubscribe
@@ -186,6 +188,48 @@ class RetryStepRequest(BaseModel):
 async def list_tool_registry(request: Request):
     tools = list_contract_safe_tool_names(tool_registry=TOOL_REGISTRY)
     return {"tools": tools, "count": len(tools), "mode": "publishable"}
+
+
+@router.get("/skill-automation-templates")
+@limiter.limit(get_user_persona_limit)
+async def list_skill_automation_templates(
+    request: Request,
+    category: str | None = None,
+    agent_id: str | None = None,
+    limit: int = 100,
+):
+    """List registered skills as guarded automation templates."""
+    try:
+        parsed_agent_id = None
+        if agent_id:
+            try:
+                parsed_agent_id = AgentID(str(agent_id).strip().upper())
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown agent_id '{agent_id}'",
+                ) from exc
+
+        bounded_limit = max(1, min(int(limit or 100), 250))
+        templates = build_skill_automation_catalog(
+            agent_id=parsed_agent_id,
+            category=category,
+            access_mode="guarded_full",
+            limit=bounded_limit,
+        )
+        return {
+            "status": "success",
+            "count": len(templates),
+            "access_mode": "guarded_full",
+            "templates": [
+                template.model_dump(mode="json") for template in templates
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing skill automation templates: {e!s}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/templates", response_model=list[WorkflowTemplateResponse])

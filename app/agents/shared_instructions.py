@@ -31,6 +31,7 @@ You have access to a powerful Skills Registry that provides domain expertise and
 - `list_skills(category)`: List all skills available to you, optionally by category
 - `search_skills(query)`: Find skills matching a keyword or topic
 - `get_skills_summary()`: Get a quick overview of available skills by category
+- `list_skill_automation_templates(category)`: See how skills can run as guarded automations
 
 **Usage Tools:**
 - `use_skill(skill_name)`: Access the knowledge, frameworks, and guidance from a skill
@@ -76,6 +77,7 @@ As a {agent_role}, you have access to a powerful Skills Registry:
 - `list_skills(category)`: List available skills, optionally by category
 - `search_skills(query)`: Find skills matching a keyword or topic  
 - `get_skills_summary()`: Quick overview of available skills
+- `list_skill_automation_templates(category)`: View guarded automation templates for skills
 
 **Usage:**
 - `use_skill(skill_name)`: Access frameworks, checklists, and expert guidance

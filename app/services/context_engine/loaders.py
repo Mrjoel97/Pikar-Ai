@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import logging
 from typing import Any
 from uuid import UUID
@@ -18,6 +19,12 @@ _FACT_COLUMNS = (
     "source_ref,last_observed_at,updated_at"
 )
 _DEFAULT_FACT_LIMIT = 20
+_MEMORY_TYPE_ORDER = {
+    "constraint": 0,
+    "goal": 1,
+    "preference": 2,
+    "fact": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,89 @@ def _map_fact(row: dict[str, Any]) -> StructuredMemoryFact:
         last_observed_at=row.get("last_observed_at"),
         updated_at=row.get("updated_at"),
     )
+
+
+def _normalize_key(key: str) -> str:
+    return str(key or "").strip().lower()
+
+
+def _scope_rank(fact: StructuredMemoryFact, agent_name: str | None) -> int:
+    scope = str(fact.scope or "global").strip().lower()
+    if (
+        scope == "agent"
+        and agent_name
+        and str(fact.agent_id or "").strip() == str(agent_name).strip()
+    ):
+        return 2
+    if scope == "global":
+        return 1
+    return 0
+
+
+def _safe_confidence(confidence: float | None) -> float:
+    try:
+        return float(confidence)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _timestamp_rank(fact: StructuredMemoryFact) -> float:
+    raw = fact.last_observed_at or fact.updated_at
+    if not raw:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError, OSError):
+        return 0.0
+
+
+def _selection_rank(
+    fact: StructuredMemoryFact,
+    *,
+    agent_name: str | None,
+) -> tuple[int, float, float]:
+    return (
+        _scope_rank(fact, agent_name),
+        _safe_confidence(fact.confidence),
+        _timestamp_rank(fact),
+    )
+
+
+def select_structured_memory_facts_for_prompt(
+    facts: list[StructuredMemoryFact],
+    *,
+    agent_name: str | None = None,
+    limit: int = _DEFAULT_FACT_LIMIT,
+) -> list[StructuredMemoryFact]:
+    """Choose deterministic, non-conflicting facts for prompt injection.
+
+    When multiple rows share the same key, agent-scoped rows win over global
+    rows for that agent. Ties then prefer higher confidence and newer
+    observation/update timestamps.
+    """
+    safe_limit = max(1, int(limit or _DEFAULT_FACT_LIMIT))
+    best_by_key: dict[str, StructuredMemoryFact] = {}
+
+    for fact in facts:
+        normalized_key = _normalize_key(fact.key)
+        if not normalized_key:
+            continue
+        current = best_by_key.get(normalized_key)
+        if current is None or _selection_rank(
+            fact,
+            agent_name=agent_name,
+        ) > _selection_rank(current, agent_name=agent_name):
+            best_by_key[normalized_key] = fact
+
+    selected = list(best_by_key.values())
+    selected.sort(
+        key=lambda fact: (
+            _MEMORY_TYPE_ORDER.get(str(fact.memory_type or "fact").lower(), 99),
+            -_scope_rank(fact, agent_name),
+            _normalize_key(fact.key),
+        )
+    )
+    return selected[:safe_limit]
 
 
 async def load_structured_memory_facts(
@@ -154,4 +244,5 @@ __all__ = [
     "StructuredMemoryFact",
     "load_structured_memory_facts",
     "load_structured_memory_facts_sync",
+    "select_structured_memory_facts_for_prompt",
 ]

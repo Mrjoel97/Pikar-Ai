@@ -513,6 +513,74 @@ Returns:
     return get_skills_summary
 
 
+def _create_list_skill_automation_templates(agent_id: AgentID) -> Callable:
+    """Create a guarded skill automation template discovery tool."""
+
+    @agent_tool
+    def list_skill_automation_templates(
+        category: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """List automation-ready skill templates with capability guardrails.
+
+        This is discovery-only. It shows how registered skills can become
+        automations, which capability tiers are visible, and which tiers require
+        human approval before execution.
+
+        Args:
+            category: Optional category filter.
+            limit: Maximum templates to return.
+
+        Returns:
+            Dictionary with guarded skill automation templates.
+        """
+        try:
+            from app.skills.automation_templates import (
+                agent_can_use_skill,
+                build_skill_automation_catalog,
+            )
+
+            bounded_limit = max(1, min(int(limit or 20), 50))
+            templates = build_skill_automation_catalog(
+                category=category,
+                limit=bounded_limit,
+                access_mode="guarded_full",
+            )
+
+            rows: list[dict[str, Any]] = []
+            for template in templates:
+                row = template.model_dump(mode="json")
+                row["agent_can_use_skill"] = agent_can_use_skill(template, agent_id)
+                rows.append(row)
+
+            return {
+                "success": True,
+                "agent_id": agent_id.value,
+                "scope": "full_skill_catalog",
+                "count": len(rows),
+                "templates": rows,
+                "tip": (
+                    "Use default_allowed_access for autonomous runs; "
+                    "approval_gates must pause before high-impact access."
+                ),
+            }
+        except Exception as e:
+            logger.error(
+                "Error listing skill automation templates for %s: %s",
+                agent_id.value,
+                e,
+            )
+            return {"success": False, "error": str(e)}
+
+    list_skill_automation_templates.__name__ = "list_skill_automation_templates"
+    list_skill_automation_templates.__doc__ = f"""List guarded skill automation templates for the {agent_id.value} agent.
+
+Returns automation-ready skill templates across the full skill catalog. High-impact
+capabilities are visible but approval-gated before execution.
+"""
+    return list_skill_automation_templates
+
+
 # =============================================================================
 # Update / Deactivate Custom Skill Tool Factories
 # =============================================================================
@@ -672,6 +740,7 @@ def get_agent_skill_tools(agent_id: AgentID) -> list[Callable]:
         _create_use_skill(agent_id),
         _create_search_skills(agent_id),
         _create_get_skills_summary(agent_id),
+        _create_list_skill_automation_templates(agent_id),
         _create_create_custom_skill(agent_id),
         _create_list_user_skills(agent_id),
         _create_update_custom_skill(agent_id),

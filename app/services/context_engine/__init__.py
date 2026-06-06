@@ -8,6 +8,7 @@ from app.services.context_engine.loaders import (
     StructuredMemoryFact,
     load_structured_memory_facts,
     load_structured_memory_facts_sync,
+    select_structured_memory_facts_for_prompt,
 )
 from app.services.context_engine.models import ContextBlock, ContextPacket
 from app.services.context_engine.writer import (
@@ -24,6 +25,7 @@ __all__ = [
     "StructuredMemoryFact",
     "load_structured_memory_facts",
     "load_structured_memory_facts_sync",
+    "select_structured_memory_facts_for_prompt",
     "infer_user_memory_fact_write_policy",
     "normalize_user_memory_fact_payload",
     "upsert_user_memory_fact",

@@ -587,6 +587,21 @@ async def lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             logger.warning("Async Supabase client pre-warm failed (non-fatal): %s", e)
 
+    # Pre-warm shared outbound HTTP client pool at startup
+    if not BYPASS_IMPORT:
+        try:
+            from app.services.http_client import prewarm_http_client_pool
+
+            await prewarm_http_client_pool()
+            logger.info(
+                "Outbound async HTTP client pool pre-warmed (max_connections=%s)",
+                int(os.environ.get("OUTBOUND_HTTP_MAX_CONNECTIONS", "200")),
+            )
+        except Exception as e:
+            logger.warning(
+                "Outbound async HTTP client pool pre-warm failed (non-fatal): %s", e
+            )
+
     # Pre-warm skill embedding index at startup (non-blocking background task)
     if not BYPASS_IMPORT:
         try:
@@ -722,6 +737,17 @@ async def lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
             logger.info("Async Supabase client closed")
     except Exception as e:
         logger.warning("Async Supabase client cleanup failed (non-fatal): %s", e)
+
+    # Cleanup: close shared outbound HTTP client pool
+    try:
+        from app.services.http_client import close_http_client_pool
+
+        await close_http_client_pool()
+        logger.info("Outbound async HTTP client pool closed")
+    except Exception as e:
+        logger.warning(
+            "Outbound async HTTP client pool cleanup failed (non-fatal): %s", e
+        )
 
     # --- Stitch MCP pool shutdown ---
     try:
